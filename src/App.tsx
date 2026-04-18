@@ -12,6 +12,7 @@ import {
   useParams,
   useSearchParams,
 } from "react-router-dom";
+import { QRCodeSVG } from "qrcode.react";
 import indiaStateDistrictData from "../node_modules/india-states-districts/state_discripts.json";
 
 type LiftType = "squat" | "bench" | "deadlift";
@@ -74,6 +75,10 @@ type AppContextValue = {
   setIncludeCollars: (include: boolean) => void;
   competitionMode: CompetitionMode;
   setCompetitionMode: (mode: CompetitionMode) => void;
+  /** When set, session order / platform flow is limited to this group name (from "Start competition" on Groups). */
+  activeCompetitionGroupName: string | null;
+  setActiveCompetitionGroupName: (name: string | null) => void;
+  setNextAttemptQueue: (queue: NextAttemptEntry[]) => void;
   timerPhase: TimerPhase;
   timerEndsAt: number | null;
   setTimerState: (phase: TimerPhase, endsAt: number | null) => void;
@@ -105,6 +110,8 @@ type PersistedState = {
   timerPhase: TimerPhase;
   timerEndsAt: number | null;
   competitionMode: CompetitionMode;
+  /** null = full meet; non-null = only this group's lifters in control / flight order */
+  activeCompetitionGroupName: string | null;
   nextAttemptQueue: NextAttemptEntry[];
 };
 
@@ -312,6 +319,7 @@ const createEmptyCompetitionState = (): PersistedState => ({
   timerPhase: "IDLE",
   timerEndsAt: null,
   competitionMode: "FULL_GAME",
+  activeCompetitionGroupName: null,
   nextAttemptQueue: [],
 });
 
@@ -335,6 +343,12 @@ const normalizeCompetitionRecord = (raw: Partial<CompetitionRecord>): Competitio
     timerPhase: raw.timerPhase ?? base.timerPhase,
     timerEndsAt: typeof raw.timerEndsAt === "number" || raw.timerEndsAt === null ? raw.timerEndsAt : base.timerEndsAt,
     competitionMode: raw.competitionMode ?? base.competitionMode,
+    activeCompetitionGroupName:
+      typeof raw.activeCompetitionGroupName === "string"
+        ? raw.activeCompetitionGroupName
+        : raw.activeCompetitionGroupName === null
+          ? null
+          : base.activeCompetitionGroupName,
     nextAttemptQueue: raw.nextAttemptQueue ?? base.nextAttemptQueue,
   };
 };
@@ -711,6 +725,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
   const [timerEndsAt, setTimerEndsAtState] = useState<number | null>(null);
   const [competitionMode, setCompetitionModeState] = useState<CompetitionMode>("FULL_GAME");
   const [nextAttemptQueue, setNextAttemptQueueState] = useState<NextAttemptEntry[]>([]);
+  const [activeCompetitionGroupName, setActiveCompetitionGroupNameState] = useState<string | null>(null);
 
   const hydrateCompetition = (competition: CompetitionRecord | null) => {
     if (!competition) {
@@ -728,6 +743,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
       setTimerEndsAtState(empty.timerEndsAt);
       setCompetitionModeState(empty.competitionMode);
       setNextAttemptQueueState(empty.nextAttemptQueue);
+      setActiveCompetitionGroupNameState(empty.activeCompetitionGroupName);
       return;
     }
 
@@ -744,6 +760,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     setTimerEndsAtState(competition.timerEndsAt);
     setCompetitionModeState(competition.competitionMode);
     setNextAttemptQueueState(competition.nextAttemptQueue);
+    setActiveCompetitionGroupNameState(competition.activeCompetitionGroupName ?? null);
   };
 
   const applyIncomingState = useCallback((data: Partial<AppContextValue>) => {
@@ -770,6 +787,10 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     }
     if (Array.isArray((data as { nextAttemptQueue?: unknown }).nextAttemptQueue)) {
       setNextAttemptQueueState((data as { nextAttemptQueue?: NextAttemptEntry[] }).nextAttemptQueue ?? []);
+    }
+    const patchGroup = data as { activeCompetitionGroupName?: string | null };
+    if (typeof patchGroup.activeCompetitionGroupName === "string" || patchGroup.activeCompetitionGroupName === null) {
+      setActiveCompetitionGroupNameState(patchGroup.activeCompetitionGroupName);
     }
   }, []);
 
@@ -815,6 +836,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
       timerPhase: parsed.timerPhase ?? "IDLE",
       timerEndsAt: parsed.timerEndsAt ?? null,
       competitionMode: parsed.competitionMode ?? "FULL_GAME",
+      activeCompetitionGroupName: null,
       nextAttemptQueue: parsed.nextAttemptQueue ?? [],
     });
     setCompetitionsState([migrated]);
@@ -872,10 +894,18 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
       if (currentLifterId !== null) setCurrentLifterIdState(null);
       return;
     }
-    if (!currentLifterId || !lifters.some((l) => l.id === currentLifterId)) {
-      setCurrentLifterIdState(lifters[0].id);
+    const pool =
+      activeCompetitionGroupName !== null
+        ? lifters.filter((l) => l.group === activeCompetitionGroupName)
+        : lifters;
+    if (!pool.length) {
+      if (currentLifterId !== null) setCurrentLifterIdState(null);
+      return;
     }
-  }, [lifters, currentLifterId]);
+    if (!currentLifterId || !pool.some((l) => l.id === currentLifterId)) {
+      setCurrentLifterIdState(pool[0].id);
+    }
+  }, [lifters, currentLifterId, activeCompetitionGroupName]);
 
   useEffect(() => {
     if (!activeCompetitionId) return;
@@ -896,6 +926,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
               timerPhase,
               timerEndsAt,
               competitionMode,
+              activeCompetitionGroupName,
               nextAttemptQueue,
             }
           : competition,
@@ -915,6 +946,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     timerPhase,
     timerEndsAt,
     competitionMode,
+    activeCompetitionGroupName,
     nextAttemptQueue,
   ]);
 
@@ -1011,6 +1043,16 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
   const broadcast = (next: Partial<AppContextValue>) => {
     socket.emit("SYNC_STATE", next);
     publishRemotePatch(next);
+  };
+
+  const setActiveCompetitionGroupName = (name: string | null) => {
+    setActiveCompetitionGroupNameState(name);
+    broadcast({ activeCompetitionGroupName: name });
+  };
+
+  const setNextAttemptQueue = (queue: NextAttemptEntry[]) => {
+    setNextAttemptQueueState(queue);
+    broadcast({ nextAttemptQueue: queue });
   };
 
   const activeCompetition =
@@ -1250,7 +1292,20 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     const updated = [...lifters];
     updated[idx] = setAttempts(selected, currentLift, attempts);
 
-    const orderedFlight = orderLiftersByIPF(updated, currentLift, currentAttemptIndex);
+    const sessionLifters =
+      activeCompetitionGroupName !== null
+        ? updated.filter((l) => l.group === activeCompetitionGroupName)
+        : updated;
+
+    const queueForSession =
+      activeCompetitionGroupName !== null
+        ? nextAttemptQueue.filter((e) => {
+            const row = updated.find((l) => l.id === e.lifterId);
+            return row ? row.group === activeCompetitionGroupName : false;
+          })
+        : nextAttemptQueue;
+
+    const orderedFlight = orderLiftersByIPF(sessionLifters, currentLift, currentAttemptIndex);
     if (!orderedFlight.length) return;
 
     let nextLift = currentLift;
@@ -1271,7 +1326,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
       if (nextStage) {
         nextLift = nextStage.lift;
         nextAttemptIdx = nextStage.attemptIndex;
-        const nextOrder = orderLiftersByIPF(updated, nextLift, nextAttemptIdx);
+        const nextOrder = orderLiftersByIPF(sessionLifters, nextLift, nextAttemptIdx);
         const nextActive = nextOrder.find((lifter) => {
           const attempt = getAttempts(lifter, nextLift)[nextAttemptIdx];
           return attempt?.status !== "GOOD" && attempt?.status !== "NO";
@@ -1281,11 +1336,11 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     }
 
     const declarationStage = resolveStageForNextAttempt(currentLift, currentAttemptIndex, competitionMode);
-    let queueAfter = nextAttemptQueue;
+    let queueAfter = queueForSession;
     if (declarationStage) {
       const declaredWeight = getAttemptValue(selected, declarationStage.lift, declarationStage.attemptIndex);
       if (declaredWeight === null) {
-        const alreadyQueued = nextAttemptQueue.some(
+        const alreadyQueued = queueForSession.some(
           (entry) =>
             entry.lifterId === selected.id &&
             entry.lift === declarationStage.lift &&
@@ -1293,7 +1348,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
         );
         if (!alreadyQueued) {
           queueAfter = [
-            ...nextAttemptQueue,
+            ...queueForSession,
             { lifterId: selected.id, lift: declarationStage.lift, attemptIndex: declarationStage.attemptIndex },
           ];
         }
@@ -1321,7 +1376,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
       setCurrentLifterId(nextLifterId);
     }
     const normalizedQueue = sortNextAttemptQueue(
-      [...queueAfter, ...derivePendingNextAttemptQueue(updated, competitionMode)],
+      [...queueAfter, ...derivePendingNextAttemptQueue(sessionLifters, competitionMode)],
       updated,
       competitionMode,
     );
@@ -1368,6 +1423,9 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
         setIncludeCollars,
         competitionMode,
         setCompetitionMode,
+        activeCompetitionGroupName,
+        setActiveCompetitionGroupName,
+        setNextAttemptQueue,
         timerPhase,
         timerEndsAt,
         setTimerState,
@@ -1644,6 +1702,8 @@ const ControlPage = () => {
     setIncludeCollars,
     competitionMode,
     setCompetitionMode,
+    activeCompetitionGroupName,
+    setActiveCompetitionGroupName,
     timerPhase,
     timerEndsAt,
     startAttemptClock,
@@ -1652,6 +1712,14 @@ const ControlPage = () => {
     applyRefereeDecision,
     resetSignals,
   } = useAppContext();
+
+  const sessionLifters = useMemo(
+    () =>
+      activeCompetitionGroupName !== null
+        ? lifters.filter((l) => l.group === activeCompetitionGroupName)
+        : lifters,
+    [lifters, activeCompetitionGroupName],
+  );
   const [showDecisionButtons, setShowDecisionButtons] = useState(true);
   const [quickWeightDraft, setQuickWeightDraft] = useState<Record<string, string>>({});
   const [actionNotice, setActionNotice] = useState("");
@@ -1668,8 +1736,8 @@ const ControlPage = () => {
   const didInitOrderWeightRef = useRef(false);
 
   const ipfOrderedLifters = useMemo(
-    () => orderLiftersByIPF(lifters, currentLift, currentAttemptIndex),
-    [lifters, currentLift, currentAttemptIndex],
+    () => orderLiftersByIPF(sessionLifters, currentLift, currentAttemptIndex),
+    [sessionLifters, currentLift, currentAttemptIndex],
   );
 
   const activeStageLifters = useMemo(
@@ -1757,6 +1825,7 @@ const ControlPage = () => {
   const currentLifter = lifters.find((l) => l.id === currentLifterId) ?? null;
 
   useEffect(() => {
+    if (activeCompetitionGroupName) return;
     if (!currentLifter) return;
     if (competitionMode === "BENCH_ONLY") return;
 
@@ -1782,7 +1851,7 @@ const ControlPage = () => {
     setCurrentLift(targetLift);
     setCurrentAttemptIndex(targetAttemptIndex);
     setActionNotice(`Group stage applied: ${targetLift.toUpperCase()} A${targetAttemptIndex + 1}`);
-  }, [competitionMode, currentLifter, currentLift, groups, lifters, setCurrentAttemptIndex, setCurrentLift]);
+  }, [activeCompetitionGroupName, competitionMode, currentLifter, currentLift, groups, lifters, setCurrentAttemptIndex, setCurrentLift]);
 
   useEffect(() => {
     if (timerPhase === "NEXT_ATTEMPT") return;
@@ -1835,15 +1904,17 @@ const ControlPage = () => {
   }, [competitionMode, currentLift, setCurrentLift, setCurrentAttemptIndex]);
 
   // Build a complete pending declaration list (SQ/BP/DL, A1/A2/A3) for all athletes.
-  const pendingQueueEntries = useMemo(
-    () =>
-      sortNextAttemptQueue(
-        [...nextAttemptQueue, ...derivePendingNextAttemptQueue(lifters, competitionMode)],
-        lifters,
-        competitionMode,
-      ).filter((entry) => isPendingQueueEntry(entry, lifters)),
-    [nextAttemptQueue, lifters, competitionMode],
-  );
+  const pendingQueueEntries = useMemo(() => {
+    const queueBase =
+      activeCompetitionGroupName !== null
+        ? nextAttemptQueue.filter((e) => sessionLifters.some((l) => l.id === e.lifterId))
+        : nextAttemptQueue;
+    return sortNextAttemptQueue(
+      [...queueBase, ...derivePendingNextAttemptQueue(sessionLifters, competitionMode)],
+      lifters,
+      competitionMode,
+    ).filter((entry) => isPendingQueueEntry(entry, lifters));
+  }, [nextAttemptQueue, lifters, sessionLifters, competitionMode, activeCompetitionGroupName]);
 
   const queuedAttemptRows = useMemo(
     () =>
@@ -2024,11 +2095,15 @@ const ControlPage = () => {
 
     // Keep platform highlight pinned to the top IPF row after editing attempts
     // from this panel so it never stays on a higher weight by mistake.
-    const nextActive = orderLiftersByIPF(merged, currentLift, currentAttemptIndex).find((row) => {
+    const orderPool =
+      activeCompetitionGroupName !== null
+        ? merged.filter((l) => l.group === activeCompetitionGroupName)
+        : merged;
+    const nextActive = orderLiftersByIPF(orderPool, currentLift, currentAttemptIndex).find((row) => {
       const attempt = getAttempts(row, currentLift)[currentAttemptIndex];
       return attempt?.status !== "GOOD" && attempt?.status !== "NO";
     });
-    setCurrentLifterId(nextActive?.id ?? orderLiftersByIPF(merged, currentLift, currentAttemptIndex)[0]?.id ?? null);
+    setCurrentLifterId(nextActive?.id ?? orderLiftersByIPF(orderPool, currentLift, currentAttemptIndex)[0]?.id ?? null);
 
     setActionNotice("Lifter updated. Control, Results, and Display are synced.");
     cancelOrderEdit();
@@ -2040,6 +2115,18 @@ const ControlPage = () => {
         Design by SUMIT BHANJA
       </p>
       <h1 className="mb-6 text-center text-3xl font-semibold text-white">Control Center</h1>
+      {activeCompetitionGroupName ? (
+        <p className="mb-4 text-center text-sm font-medium text-amber-200/95">
+          Group session: <span className="font-semibold text-amber-100">{activeCompetitionGroupName}</span> — lifter list and order are limited to this group.{" "}
+          <button
+            type="button"
+            onClick={() => setActiveCompetitionGroupName(null)}
+            className="inline font-semibold text-cyan-300 underline decoration-cyan-300/50 underline-offset-2 hover:text-cyan-200"
+          >
+            Show all groups
+          </button>
+        </p>
+      ) : null}
       <div className="mb-4 rounded-2xl border border-white/15 bg-black/30 p-4 text-center">
         {timerPhase === "ATTEMPT" ? (
           <p className="text-lg font-semibold text-cyan-200 md:text-2xl">
@@ -3179,7 +3266,19 @@ const LifterManagementPage = () => {
 };
 
 const GroupManagementPage = () => {
-  const { groups, setGroups, lifters, setLifters, setCompetitionStarted, setCurrentLift, setCurrentAttemptIndex, setCurrentLifterId, setCompetitionMode } = useAppContext();
+  const {
+    groups,
+    setGroups,
+    lifters,
+    setLifters,
+    setCompetitionStarted,
+    setCurrentLift,
+    setCurrentAttemptIndex,
+    setCurrentLifterId,
+    setCompetitionMode,
+    setActiveCompetitionGroupName,
+    setNextAttemptQueue,
+  } = useAppContext();
   const [groupName, setGroupName] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [activeGroupFilter, setActiveGroupFilter] = useState("");
@@ -3294,6 +3393,8 @@ const GroupManagementPage = () => {
       return;
     }
     const newMode: CompetitionMode = enabledLifts.length === 1 && enabledLifts[0] === "bench" ? "BENCH_ONLY" : "FULL_GAME";
+    setNextAttemptQueue([]);
+    setActiveCompetitionGroupName(group.name);
     setCompetitionMode(newMode);
     setCurrentLift(firstLift);
     setCurrentAttemptIndex(0);
@@ -3879,6 +3980,7 @@ const RefereePage = () => {
     timerPhase,
     timerEndsAt,
     nextAttemptQueue,
+    activeCompetitionGroupName,
     resetSignals,
   } = useAppContext();
   const [connectedCount, setConnectedCount] = useState(0);
@@ -3916,7 +4018,36 @@ const RefereePage = () => {
     };
   }, [activeCompetitionId]);
 
-  const openRefereeScreen = (slot: RefereeSlot) => {
+  const [qrModal, setQrModal] = useState<{ slot: RefereeSlot; title: string; url: string } | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
+
+  useEffect(() => {
+    if (!qrModal) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setQrModal(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [qrModal]);
+
+  const getRefereeBootstrapPayload = (): PersistedState => ({
+    lifters,
+    groups,
+    currentLifterId,
+    refereeSignals,
+    refereeInputLocked,
+    currentLift,
+    currentAttemptIndex,
+    competitionStarted,
+    includeCollars,
+    competitionMode,
+    nextAttemptQueue,
+    timerPhase,
+    timerEndsAt,
+    activeCompetitionGroupName,
+  });
+
+  const buildRefereeLink = (slot: RefereeSlot) => {
     const activeCompetitionName =
       competitions.find((competition) => competition.id === activeCompetitionId)?.name ?? "Competition";
     const seededCompetition = normalizeCompetitionRecord({
@@ -3936,11 +4067,17 @@ const RefereePage = () => {
       nextAttemptQueue,
       timerPhase,
       timerEndsAt,
+      activeCompetitionGroupName,
     });
     const seedValue = encodeUrlSeed(seededCompetition);
     const seedParam = seedValue ? `&seed=${encodeURIComponent(seedValue)}` : "";
     const cidParam = activeCompetitionId ? `&cid=${encodeURIComponent(activeCompetitionId)}` : "";
     const url = `${window.location.origin}${window.location.pathname}#/signals/${slot}?live=1${cidParam}${seedParam}`;
+    return { url, seedValue };
+  };
+
+  const openRefereeScreen = (slot: RefereeSlot) => {
+    const { url, seedValue } = buildRefereeLink(slot);
     const popup = window.open(url, "_blank", "width=900,height=700");
     if (!popup) {
       const fallbackParams = new URLSearchParams();
@@ -3950,21 +4087,7 @@ const RefereePage = () => {
       return;
     }
 
-    const bootstrapPayload: PersistedState = {
-      lifters,
-      groups,
-      currentLifterId,
-      refereeSignals,
-      refereeInputLocked,
-      currentLift,
-      currentAttemptIndex,
-      competitionStarted,
-      includeCollars,
-      competitionMode,
-      nextAttemptQueue,
-      timerPhase,
-      timerEndsAt,
-    };
+    const bootstrapPayload = getRefereeBootstrapPayload();
 
     // Retry postMessage so referee popup gets state even on slow mobile webviews.
     let tries = 0;
@@ -3977,13 +4100,33 @@ const RefereePage = () => {
     postBootstrap();
   };
 
+  const openQrForSlot = (slot: RefereeSlot, title: string) => {
+    setLinkCopied(false);
+    const { url } = buildRefereeLink(slot);
+    setQrModal({ slot, title, url });
+  };
+
+  const copyRefereeLink = async () => {
+    if (!qrModal) return;
+    try {
+      await navigator.clipboard.writeText(qrModal.url);
+      setLinkCopied(true);
+      window.setTimeout(() => setLinkCopied(false), 2000);
+    } catch {
+      setLinkCopied(false);
+    }
+  };
+
   return (
     <section>
       <SectionHeader title="Referee Signals" path="/signals" />
       <div className="mb-3 inline-flex items-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-sm font-semibold text-emerald-200">
         Referees Connected: {connectedCount} / 3
       </div>
-      <p className="mb-4 text-sm text-slate-300">Tap Left, Center, or Right to open that referee decision page.</p>
+      <p className="mb-4 text-sm text-slate-300">
+        Tap a referee card for a phone QR code, or use <span className="text-cyan-300">Open in new window</span> from the
+        dialog.
+      </p>
       <div className="flex gap-4 overflow-x-auto pb-2">
         {REFEREE_SLOT_CONFIG.map((slot) => {
           const signal = refereeSignals[slot.index];
@@ -3992,11 +4135,12 @@ const RefereePage = () => {
           return (
             <button
               key={slot.key}
-              onClick={() => openRefereeScreen(slot.key)}
+              type="button"
+              onClick={() => openQrForSlot(slot.key, slot.label)}
               className="min-w-[210px] flex-1 rounded-2xl border border-white/15 bg-white/5 p-6 text-center transition hover:border-cyan-300/60 hover:bg-cyan-500/10"
             >
               <p className="text-2xl font-semibold text-white">{slot.label}</p>
-              <p className="mt-1 text-xs uppercase tracking-[0.2em] text-slate-300">Referee</p>
+              <p className="mt-1 text-xs uppercase tracking-[0.2em] text-slate-300">Referee · tap for QR</p>
               <p className={`mt-2 text-xs font-semibold ${isConnected ? "text-emerald-300" : "text-slate-400"}`}>
                 {isConnected ? "Connected" : "Offline"}
               </p>
@@ -4013,6 +4157,55 @@ const RefereePage = () => {
       <button onClick={resetSignals} className="mt-5 rounded-xl bg-white/10 px-4 py-2 text-sm">
         Reset All Signals
       </button>
+
+      {qrModal ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="referee-qr-title"
+          onClick={() => setQrModal(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl border border-white/15 bg-[#0b1222] p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="referee-qr-title" className="text-center text-lg font-semibold text-white">
+              {qrModal.title} referee
+            </h2>
+            <p className="mt-1 text-center text-sm text-slate-400">Scan with a phone camera to open this station.</p>
+            <div className="mt-4 flex justify-center rounded-xl bg-white p-4">
+              <QRCodeSVG value={qrModal.url} size={220} level="M" includeMargin />
+            </div>
+            <p className="mt-3 max-h-24 overflow-y-auto break-all text-center text-[10px] leading-relaxed text-slate-500">
+              {qrModal.url}
+            </p>
+            <div className="mt-5 flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => openRefereeScreen(qrModal.slot)}
+                className="rounded-xl bg-cyan-500 py-3 text-sm font-semibold text-black"
+              >
+                Open in new window
+              </button>
+              <button
+                type="button"
+                onClick={() => void copyRefereeLink()}
+                className="rounded-xl border border-white/20 bg-white/5 py-3 text-sm font-semibold text-white"
+              >
+                {linkCopied ? "Copied link" : "Copy link"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setQrModal(null)}
+                className="rounded-xl py-2 text-sm font-medium text-slate-400 hover:text-white"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 };
@@ -4285,6 +4478,7 @@ const ScreenPage = () => {
     timerPhase,
     timerEndsAt,
     nextAttemptQueue,
+    activeCompetitionGroupName,
     competitions,
     activeCompetitionId,
   } = useAppContext();
@@ -4297,9 +4491,20 @@ const ScreenPage = () => {
       id: activeCompetitionId ?? `comp-${Date.now()}`,
       name: activeCompetitionName,
       createdAt: Date.now(),
-      lifters, groups, currentLifterId, refereeSignals, refereeInputLocked,
-      currentLift, currentAttemptIndex, competitionStarted, includeCollars,
-      competitionMode, nextAttemptQueue, timerPhase, timerEndsAt,
+      lifters,
+      groups,
+      currentLifterId,
+      refereeSignals,
+      refereeInputLocked,
+      currentLift,
+      currentAttemptIndex,
+      competitionStarted,
+      includeCollars,
+      competitionMode,
+      nextAttemptQueue,
+      timerPhase,
+      timerEndsAt,
+      activeCompetitionGroupName,
     });
     const seedValue = encodeUrlSeed(seededCompetition);
     const seedParam = seedValue ? `&seed=${encodeURIComponent(seedValue)}` : "";
@@ -4323,6 +4528,7 @@ const ScreenPage = () => {
       nextAttemptQueue,
       timerPhase,
       timerEndsAt,
+      activeCompetitionGroupName,
     };
 
     // Retry a few times so the new tab receives state even if it boots slowly on mobile webviews.
@@ -4770,6 +4976,7 @@ const DisplayFullPage = () => {
     includeCollars,
     timerPhase,
     timerEndsAt,
+    activeCompetitionGroupName,
   } = useAppContext();
   const [searchParams] = useSearchParams();
   const rawLayout = searchParams.get("layout") || "signal_results_plate";
@@ -4864,9 +5071,17 @@ const DisplayFullPage = () => {
     [lifters],
   );
 
+  const displaySessionLifters = useMemo(
+    () =>
+      activeCompetitionGroupName !== null
+        ? lifters.filter((l) => l.group === activeCompetitionGroupName)
+        : lifters,
+    [lifters, activeCompetitionGroupName],
+  );
+
   const orderedByCurrentRound = useMemo(
-    () => orderLiftersByIPF(lifters, currentLift, currentAttemptIndex),
-    [lifters, currentLift, currentAttemptIndex],
+    () => orderLiftersByIPF(displaySessionLifters, currentLift, currentAttemptIndex),
+    [displaySessionLifters, currentLift, currentAttemptIndex],
   );
 
   if (displayMode === "ipf_plate") {
