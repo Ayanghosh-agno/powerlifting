@@ -14,6 +14,7 @@ import {
 } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
 import indiaStateDistrictData from "../node_modules/india-states-districts/state_discripts.json";
+import { useSupabaseSync, type ConnectedRefereeSlots } from "./lib/useSupabaseSync";
 
 type LiftType = "squat" | "bench" | "deadlift";
 type AttemptStatus = "PENDING" | "GOOD" | "NO" | "UNATTEMPTED";
@@ -95,6 +96,10 @@ type AppContextValue = {
   ) => { ok: boolean; message: string };
   applyRefereeDecision: (overrideSignals?: RefSignal[]) => void;
   resetSignals: () => void;
+  connectedRefereeSlots: ConnectedRefereeSlots;
+  publishRefereeSignal: (position: number, signal: RefSignal) => Promise<void>;
+  sendRefereeHeartbeat: (position: number) => Promise<void>;
+  removeRefereeDevice: (position: number) => Promise<void>;
 };
 
 type PersistedState = {
@@ -710,6 +715,12 @@ const useAppContext = () => {
 const AppProvider = ({ children }: { children: React.ReactNode }) => {
   const seedAppliedRef = useRef(false);
   const relayClientIdRef = useRef(`relay-${Math.random().toString(36).slice(2, 10)}-${Date.now().toString(36)}`);
+  const deviceIdRef = useRef(`device-${Math.random().toString(36).slice(2, 10)}-${Date.now().toString(36)}`);
+  const [connectedRefereeSlots, setConnectedRefereeSlots] = useState<ConnectedRefereeSlots>({
+    left: false,
+    center: false,
+    right: false,
+  });
   const [competitions, setCompetitionsState] = useState<CompetitionRecord[]>([]);
   const [activeCompetitionId, setActiveCompetitionIdState] = useState<string | null>(null);
   const [lifters, setLiftersState] = useState<Lifter[]>([]);
@@ -726,6 +737,56 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
   const [competitionMode, setCompetitionModeState] = useState<CompetitionMode>("FULL_GAME");
   const [nextAttemptQueue, setNextAttemptQueueState] = useState<NextAttemptEntry[]>([]);
   const [activeCompetitionGroupName, setActiveCompetitionGroupNameState] = useState<string | null>(null);
+
+  const onCompetitionsLoaded = useCallback((loadedComps: CompetitionRecord[]) => {
+    const normalized = loadedComps.map((c) => normalizeCompetitionRecord(c));
+    setCompetitionsState(normalized);
+    if (normalized.length > 0) {
+      const first = normalized[0];
+      setActiveCompetitionIdState(first.id);
+      setLiftersState(first.lifters);
+      setGroupsState(first.groups);
+      setCurrentLifterIdState(first.currentLifterId ?? first.lifters[0]?.id ?? null);
+      setRefereeSignalsState(first.refereeSignals);
+      setRefereeInputLockedState(first.refereeInputLocked);
+      setCurrentLiftState(first.currentLift);
+      setCurrentAttemptIndexState(first.currentAttemptIndex);
+      setCompetitionStartedState(first.competitionStarted);
+      setIncludeCollarsState(first.includeCollars);
+      setTimerPhaseState(first.timerPhase);
+      setTimerEndsAtState(first.timerEndsAt);
+      setCompetitionModeState(first.competitionMode);
+      setNextAttemptQueueState(first.nextAttemptQueue);
+      setActiveCompetitionGroupNameState(first.activeCompetitionGroupName ?? null);
+    }
+  }, []);
+
+  const onRefereeSignalsChanged = useCallback((signals: RefSignal[]) => {
+    setRefereeSignalsState(signals);
+    socket.emit("SYNC_STATE", { refereeSignals: signals });
+  }, []);
+
+  const onDevicesChanged = useCallback((devices: ConnectedRefereeSlots) => {
+    setConnectedRefereeSlots(devices);
+  }, []);
+
+  const {
+    publishSignal,
+    clearSignals,
+    sendHeartbeat,
+    removeDevice,
+    createCompetitionInDb,
+    deleteCompetitionFromDb,
+    updateCompetitionNameInDb,
+  } = useSupabaseSync(
+    activeCompetitionId,
+    competitions,
+    lifters,
+    groups,
+    refereeSignals,
+    { onCompetitionsLoaded, onRefereeSignalsChanged, onDevicesChanged },
+    deviceIdRef.current
+  );
 
   const hydrateCompetition = (competition: CompetitionRecord | null) => {
     if (!competition) {
@@ -1084,6 +1145,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
       activeCompetitionId: created.id,
       ...created,
     });
+    createCompetitionInDb(created);
     return { ok: true, message: "Competition created.", competitionId: created.id };
   };
 
@@ -1117,6 +1179,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     );
     setCompetitionsState(updatedCompetitions);
     broadcast({ competitions: updatedCompetitions });
+    updateCompetitionNameInDb(competitionId, nextName);
     return { ok: true, message: "Competition name updated." };
   };
 
@@ -1134,6 +1197,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
       activeCompetitionId: nextActiveId,
       ...(nextActiveCompetition ?? createEmptyCompetitionState()),
     });
+    deleteCompetitionFromDb(competitionId);
   };
 
   const setLifters = (next: Lifter[]) => {
@@ -1211,7 +1275,10 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     setTimerState("IDLE", null);
   };
 
-  const resetSignals = () => setRefereeSignals([null, null, null]);
+  const resetSignals = () => {
+    setRefereeSignals([null, null, null]);
+    clearSignals();
+  };
 
   const submitNextAttempt = (weight: number) => {
     if (weight <= 0) return { ok: false, message: "Weight must be greater than 0." };
@@ -1437,6 +1504,10 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
         updateAttemptForLifter,
         applyRefereeDecision,
         resetSignals,
+        connectedRefereeSlots,
+        publishRefereeSignal: publishSignal,
+        sendRefereeHeartbeat: sendHeartbeat,
+        removeRefereeDevice: removeDevice,
       }}
     >
       {children}
@@ -3982,9 +4053,16 @@ const RefereePage = () => {
     nextAttemptQueue,
     activeCompetitionGroupName,
     resetSignals,
+    connectedRefereeSlots,
   } = useAppContext();
   const [connectedCount, setConnectedCount] = useState(0);
   const [presenceBySlot, setPresenceBySlot] = useState<RefereePresenceMap>({});
+
+  useEffect(() => {
+    const slots = connectedRefereeSlots;
+    const count = [slots.left, slots.center, slots.right].filter(Boolean).length;
+    setConnectedCount(count);
+  }, [connectedRefereeSlots]);
 
   useEffect(() => {
     const requestedCompetitionId = searchParams.get("cid");
@@ -4000,7 +4078,8 @@ const RefereePage = () => {
     const syncPresence = () => {
       const presence = readRefereePresence(activeCompetitionId);
       setPresenceBySlot(presence);
-      setConnectedCount(countConnectedReferees(activeCompetitionId));
+      const localCount = countConnectedReferees(activeCompetitionId);
+      if (localCount > 0) setConnectedCount(localCount);
     };
 
     syncPresence();
@@ -4130,20 +4209,25 @@ const RefereePage = () => {
       <div className="flex gap-4 overflow-x-auto pb-2">
         {REFEREE_SLOT_CONFIG.map((slot) => {
           const signal = refereeSignals[slot.index];
-          const connectedTs = presenceBySlot[slot.key];
-          const isConnected = typeof connectedTs === "number" && Date.now() - connectedTs <= REFEREE_PRESENCE_TTL_MS;
+          const localConnectedTs = presenceBySlot[slot.key];
+          const localConnected = typeof localConnectedTs === "number" && Date.now() - localConnectedTs <= REFEREE_PRESENCE_TTL_MS;
+          const dbConnected = connectedRefereeSlots[slot.key];
+          const isConnected = localConnected || dbConnected;
           return (
             <button
               key={slot.key}
               type="button"
               onClick={() => openQrForSlot(slot.key, slot.label)}
-              className="min-w-[210px] flex-1 rounded-2xl border border-white/15 bg-white/5 p-6 text-center transition hover:border-cyan-300/60 hover:bg-cyan-500/10"
+              className={`min-w-[210px] flex-1 rounded-2xl border p-6 text-center transition hover:border-cyan-300/60 hover:bg-cyan-500/10 ${
+                isConnected ? "border-emerald-400/40 bg-emerald-500/10" : "border-white/15 bg-white/5"
+              }`}
             >
               <p className="text-2xl font-semibold text-white">{slot.label}</p>
               <p className="mt-1 text-xs uppercase tracking-[0.2em] text-slate-300">Referee · tap for QR</p>
-              <p className={`mt-2 text-xs font-semibold ${isConnected ? "text-emerald-300" : "text-slate-400"}`}>
+              <div className={`mt-2 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${isConnected ? "bg-emerald-500/20 text-emerald-300" : "bg-slate-700/50 text-slate-400"}`}>
+                <span className={`h-1.5 w-1.5 rounded-full ${isConnected ? "bg-emerald-400 animate-pulse" : "bg-slate-500"}`} />
                 {isConnected ? "Connected" : "Offline"}
-              </p>
+              </div>
               <div
                 className={`mx-auto mt-5 h-16 w-16 rounded-xl border border-white/20 ${
                   signal === null ? "bg-slate-700" : signal === "GOOD" ? "bg-emerald-500" : "bg-red-500"
@@ -4224,6 +4308,9 @@ const RefereeStationPage = () => {
     applyRefereeDecision,
     refereeInputLocked,
     setRefereeInputLocked,
+    publishRefereeSignal,
+    sendRefereeHeartbeat,
+    removeRefereeDevice,
   } = useAppContext();
   const [decisionEndsAt, setDecisionEndsAt] = useState<number | null>(null);
   const [pendingDecision, setPendingDecision] = useState<Exclude<RefSignal, null> | null>(null);
@@ -4270,12 +4357,14 @@ const RefereeStationPage = () => {
     const markActive = () => {
       const presence = readRefereePresence(activeCompetitionId);
       writeRefereePresence(activeCompetitionId, { ...presence, [config.key]: Date.now() });
+      sendRefereeHeartbeat(config.index);
     };
 
     const clearActive = () => {
       const presence = readRefereePresence(activeCompetitionId);
       delete presence[config.key];
       writeRefereePresence(activeCompetitionId, presence);
+      removeRefereeDevice(config.index);
     };
 
     markActive();
@@ -4287,7 +4376,7 @@ const RefereeStationPage = () => {
       window.removeEventListener("beforeunload", clearActive);
       clearActive();
     };
-  }, [activeCompetitionId, config]);
+  }, [activeCompetitionId, config, sendRefereeHeartbeat, removeRefereeDevice]);
 
   useEffect(() => {
     if (!refereeInputLocked) return;
@@ -4370,6 +4459,7 @@ const RefereeStationPage = () => {
     holdTimeoutRef.current = window.setTimeout(() => {
       if (navigator.vibrate) navigator.vibrate(80);
       const nextSignals = refereeSignals.map((signal, idx) => (idx === config.index ? decision : signal));
+      publishRefereeSignal(config.index, decision);
       commitTimeoutRef.current = window.setTimeout(() => {
         setRefereeSignals(nextSignals);
         commitTimeoutRef.current = null;
@@ -5510,6 +5600,182 @@ const DisplayFullPage = () => {
   );
 };
 
+const DB_SETUP_SQL = `-- Run this in your Supabase SQL Editor (Dashboard → SQL Editor)
+
+CREATE TABLE IF NOT EXISTS competitions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name text NOT NULL DEFAULT '',
+  mode text NOT NULL DEFAULT 'FULL_GAME',
+  include_collars boolean NOT NULL DEFAULT true,
+  started boolean NOT NULL DEFAULT false,
+  active_group_name text DEFAULT NULL,
+  current_lifter_id uuid DEFAULT NULL,
+  current_lift text NOT NULL DEFAULT 'squat',
+  current_attempt_index integer NOT NULL DEFAULT 0,
+  timer_phase text NOT NULL DEFAULT 'IDLE',
+  timer_ends_at bigint DEFAULT NULL,
+  display_layout text NOT NULL DEFAULT 'signal_results_plate',
+  display_theme text NOT NULL DEFAULT 'black',
+  next_attempt_queue jsonb NOT NULL DEFAULT '[]',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS groups (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  competition_id uuid NOT NULL REFERENCES competitions(id) ON DELETE CASCADE,
+  name text NOT NULL DEFAULT '',
+  current_lift text NOT NULL DEFAULT 'squat',
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS lifters (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  competition_id uuid NOT NULL REFERENCES competitions(id) ON DELETE CASCADE,
+  name text NOT NULL DEFAULT '',
+  sex text NOT NULL DEFAULT 'Male',
+  dob text NOT NULL DEFAULT '',
+  bodyweight numeric DEFAULT NULL,
+  weight_class text NOT NULL DEFAULT '',
+  manual_weight_class text NOT NULL DEFAULT '',
+  is_equipped boolean NOT NULL DEFAULT false,
+  disqualified boolean NOT NULL DEFAULT false,
+  category text NOT NULL DEFAULT 'Senior',
+  group_name text NOT NULL DEFAULT '',
+  team text NOT NULL DEFAULT '',
+  rack_height_squat numeric DEFAULT NULL,
+  rack_height_bench numeric DEFAULT NULL,
+  lot integer DEFAULT NULL,
+  squat_attempts jsonb NOT NULL DEFAULT '[{"weight":"","status":"PENDING"},{"weight":"","status":"PENDING"},{"weight":"","status":"PENDING"}]',
+  bench_attempts jsonb NOT NULL DEFAULT '[{"weight":"","status":"PENDING"},{"weight":"","status":"PENDING"},{"weight":"","status":"PENDING"}]',
+  deadlift_attempts jsonb NOT NULL DEFAULT '[{"weight":"","status":"PENDING"},{"weight":"","status":"PENDING"},{"weight":"","status":"PENDING"}]',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS referee_signals (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  competition_id uuid NOT NULL REFERENCES competitions(id) ON DELETE CASCADE,
+  position integer NOT NULL,
+  signal text DEFAULT NULL,
+  device_id text NOT NULL DEFAULT '',
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE(competition_id, position)
+);
+
+CREATE TABLE IF NOT EXISTS referee_devices (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  competition_id uuid NOT NULL REFERENCES competitions(id) ON DELETE CASCADE,
+  device_id text NOT NULL DEFAULT '',
+  position integer NOT NULL,
+  last_seen_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE(competition_id, position)
+);
+
+CREATE INDEX IF NOT EXISTS idx_groups_competition_id ON groups(competition_id);
+CREATE INDEX IF NOT EXISTS idx_lifters_competition_id ON lifters(competition_id);
+CREATE INDEX IF NOT EXISTS idx_referee_signals_competition_id ON referee_signals(competition_id);
+CREATE INDEX IF NOT EXISTS idx_referee_devices_competition_id ON referee_devices(competition_id);
+
+ALTER TABLE competitions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE groups ENABLE ROW LEVEL SECURITY;
+ALTER TABLE lifters ENABLE ROW LEVEL SECURITY;
+ALTER TABLE referee_signals ENABLE ROW LEVEL SECURITY;
+ALTER TABLE referee_devices ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "competitions_select" ON competitions FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "competitions_insert" ON competitions FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "competitions_update" ON competitions FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "competitions_delete" ON competitions FOR DELETE TO anon, authenticated USING (true);
+CREATE POLICY "groups_select" ON groups FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "groups_insert" ON groups FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "groups_update" ON groups FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "groups_delete" ON groups FOR DELETE TO anon, authenticated USING (true);
+CREATE POLICY "lifters_select" ON lifters FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "lifters_insert" ON lifters FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "lifters_update" ON lifters FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "lifters_delete" ON lifters FOR DELETE TO anon, authenticated USING (true);
+CREATE POLICY "referee_signals_select" ON referee_signals FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "referee_signals_insert" ON referee_signals FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "referee_signals_update" ON referee_signals FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "referee_signals_delete" ON referee_signals FOR DELETE TO anon, authenticated USING (true);
+CREATE POLICY "referee_devices_select" ON referee_devices FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "referee_devices_insert" ON referee_devices FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "referee_devices_update" ON referee_devices FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "referee_devices_delete" ON referee_devices FOR DELETE TO anon, authenticated USING (true);
+
+ALTER PUBLICATION supabase_realtime ADD TABLE referee_signals;
+ALTER PUBLICATION supabase_realtime ADD TABLE referee_devices;`;
+
+const DbSetupBanner = () => {
+  const [dbReady, setDbReady] = useState<boolean | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [show, setShow] = useState(false);
+
+  useEffect(() => {
+    const check = async () => {
+      try {
+        const { supabase } = await import("./lib/supabase");
+        const { error } = await supabase.from("competitions").select("id").limit(1).maybeSingle();
+        setDbReady(!error || error.code !== "PGRST205");
+      } catch {
+        setDbReady(false);
+      }
+    };
+    check();
+    const interval = window.setInterval(check, 5000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  const copySQL = async () => {
+    try {
+      await navigator.clipboard.writeText(DB_SETUP_SQL);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  if (dbReady === null || dbReady === true) return null;
+
+  return (
+    <div className="fixed inset-x-0 bottom-0 z-50 border-t border-amber-400/30 bg-[#1a1200] px-4 py-3">
+      <div className="mx-auto flex max-w-4xl flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <span className="h-2 w-2 rounded-full bg-amber-400" />
+          <p className="text-sm font-semibold text-amber-200">Database not set up yet</p>
+          <p className="hidden text-xs text-amber-300/70 sm:block">— App will work offline using local storage until the database is configured.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShow((v) => !v)}
+            className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-200 transition hover:bg-amber-500/20"
+          >
+            {show ? "Hide SQL" : "View Setup SQL"}
+          </button>
+          <button
+            onClick={copySQL}
+            className="rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-bold text-black transition hover:bg-amber-400"
+          >
+            {copied ? "Copied!" : "Copy SQL"}
+          </button>
+        </div>
+      </div>
+      {show && (
+        <div className="mx-auto mt-3 max-w-4xl">
+          <p className="mb-2 text-xs text-amber-300/80">
+            Run this in your <span className="font-semibold">Supabase Dashboard → SQL Editor</span> to enable full database sync and real-time referee signals.
+          </p>
+          <pre className="max-h-48 overflow-y-auto rounded-lg border border-white/10 bg-black/40 p-3 text-xs text-slate-300">
+            {DB_SETUP_SQL}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const AppRoutes = () => (
   <Routes>
     <Route path="/display/full" element={<DisplayFullPage />} />
@@ -5554,6 +5820,7 @@ export default function App() {
     <AppProvider>
       <HashRouter>
         <AppRoutes />
+        <DbSetupBanner />
       </HashRouter>
     </AppProvider>
   );
