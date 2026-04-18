@@ -198,15 +198,7 @@ export function useSupabaseSync(
         const dbComps = await dbCompetitions.list();
         if (cancelled) return;
 
-        if (dbComps.length === 0 && competitions.length > 0) {
-          for (const comp of competitions) {
-            try {
-              await dbCompetitions.upsert(competitionToDb(comp));
-              await dbLifters.upsertAll(comp.id, comp.lifters.map((l) => lifterToDb(l, comp.id)));
-              await dbGroups.upsertAll(comp.id, comp.groups.map((g) => groupToDb(g, comp.id)));
-            } catch {
-            }
-          }
+        if (dbComps.length === 0) {
           dbReadyRef.current = true;
           return;
         }

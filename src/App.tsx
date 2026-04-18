@@ -739,6 +739,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
   const [activeCompetitionGroupName, setActiveCompetitionGroupNameState] = useState<string | null>(null);
 
   const onCompetitionsLoaded = useCallback((loadedComps: CompetitionRecord[]) => {
+    if (loadedComps.length === 0) return;
     const normalized = loadedComps.map((c) => normalizeCompetitionRecord(c));
     setCompetitionsState(normalized);
     if (normalized.length > 0) {
