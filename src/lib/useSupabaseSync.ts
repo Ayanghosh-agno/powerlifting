@@ -59,7 +59,7 @@ export type ConnectedRefereeSlots = {
   right: boolean;
 };
 
-const REFEREE_DEVICE_TTL_MS = 10_000;
+const REFEREE_DEVICE_TTL_MS = 8_000;
 
 function lifterToDb(lifter: Lifter, competitionId: string) {
   return {
@@ -305,6 +305,20 @@ export function useSupabaseSync(
   useEffect(() => {
     if (!activeCompetitionId) return;
 
+    const refreshSignals = async () => {
+      try {
+        const rows = await dbRefereeSignals.listForCompetition(activeCompetitionId);
+        const signals: RefSignal[] = [null, null, null];
+        for (const row of rows) {
+          if (row.position >= 0 && row.position <= 2) {
+            signals[row.position] = (row.signal as RefSignal) ?? null;
+          }
+        }
+        onRefereeSignalsChanged(signals);
+      } catch {
+      }
+    };
+
     const channel = supabase
       .channel(`referee-signals-${activeCompetitionId}`)
       .on(
@@ -315,29 +329,29 @@ export function useSupabaseSync(
           table: "referee_signals",
           filter: `competition_id=eq.${activeCompetitionId}`,
         },
-        async () => {
-          try {
-            const rows = await dbRefereeSignals.listForCompetition(activeCompetitionId);
-            const signals: RefSignal[] = [null, null, null];
-            for (const row of rows) {
-              if (row.position >= 0 && row.position <= 2) {
-                signals[row.position] = (row.signal as RefSignal) ?? null;
-              }
-            }
-            onRefereeSignalsChanged(signals);
-          } catch {
-          }
-        }
+        refreshSignals
       )
       .subscribe();
 
+    refreshSignals();
+    const pollInterval = window.setInterval(refreshSignals, 3000);
+
     return () => {
+      window.clearInterval(pollInterval);
       supabase.removeChannel(channel);
     };
   }, [activeCompetitionId, onRefereeSignalsChanged]);
 
   useEffect(() => {
     if (!activeCompetitionId) return;
+
+    const refreshDevices = async () => {
+      try {
+        const rows = await dbRefereeDevices.listForCompetition(activeCompetitionId);
+        onDevicesChanged(computeDeviceSlots(rows));
+      } catch {
+      }
+    };
 
     const channel = supabase
       .channel(`referee-devices-${activeCompetitionId}`)
@@ -349,17 +363,15 @@ export function useSupabaseSync(
           table: "referee_devices",
           filter: `competition_id=eq.${activeCompetitionId}`,
         },
-        async () => {
-          try {
-            const rows = await dbRefereeDevices.listForCompetition(activeCompetitionId);
-            onDevicesChanged(computeDeviceSlots(rows));
-          } catch {
-          }
-        }
+        refreshDevices
       )
       .subscribe();
 
+    refreshDevices();
+    const pollInterval = window.setInterval(refreshDevices, 3000);
+
     return () => {
+      window.clearInterval(pollInterval);
       supabase.removeChannel(channel);
     };
   }, [activeCompetitionId, onDevicesChanged, computeDeviceSlots]);
