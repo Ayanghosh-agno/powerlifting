@@ -88,6 +88,13 @@ export const dbCompetitions = {
     return data;
   },
 
+  async upsert(comp: Omit<DbCompetition, "created_at" | "updated_at">): Promise<void> {
+    const { error } = await supabase
+      .from("competitions")
+      .upsert({ ...comp, updated_at: new Date().toISOString() }, { onConflict: "id" });
+    if (error) throw error;
+  },
+
   async update(id: string, patch: Partial<DbCompetition>): Promise<void> {
     const { error } = await supabase
       .from("competitions")

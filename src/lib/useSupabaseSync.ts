@@ -201,7 +201,7 @@ export function useSupabaseSync(
         if (dbComps.length === 0 && competitions.length > 0) {
           for (const comp of competitions) {
             try {
-              await dbCompetitions.create(competitionToDb(comp));
+              await dbCompetitions.upsert(competitionToDb(comp));
               await dbLifters.upsertAll(comp.id, comp.lifters.map((l) => lifterToDb(l, comp.id)));
               await dbGroups.upsertAll(comp.id, comp.groups.map((g) => groupToDb(g, comp.id)));
             } catch {
@@ -265,7 +265,7 @@ export function useSupabaseSync(
     if (compSaveRef.current) clearTimeout(compSaveRef.current);
     compSaveRef.current = setTimeout(async () => {
       try {
-        await dbCompetitions.update(activeCompetitionId, competitionToDb(comp));
+        await dbCompetitions.upsert(competitionToDb(comp));
       } catch {
       }
     }, 800);
@@ -415,7 +415,7 @@ export function useSupabaseSync(
 
   const createCompetitionInDb = useCallback(async (comp: CompetitionRecord) => {
     try {
-      await dbCompetitions.create(competitionToDb(comp));
+      await dbCompetitions.upsert(competitionToDb(comp));
       dbReadyRef.current = true;
     } catch {
     }
