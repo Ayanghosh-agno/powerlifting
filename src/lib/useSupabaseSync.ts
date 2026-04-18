@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from "react";
 import { supabase } from "./supabase";
-import { dbCompetitions, dbGroups, dbLifters, dbRefereeSignals, dbRefereeDevices } from "./db";
+import { dbCompetitions, dbGroups, dbLifters, dbRefereeSignals } from "./db";
 
 type RefSignal = "GOOD" | "NO" | null;
 type LiftType = "squat" | "bench" | "deadlift";
@@ -58,8 +58,6 @@ export type ConnectedRefereeSlots = {
   center: boolean;
   right: boolean;
 };
-
-const REFEREE_DEVICE_TTL_MS = 8_000;
 
 function lifterToDb(lifter: Lifter, competitionId: string) {
   return {
@@ -175,20 +173,6 @@ export function useSupabaseSync(
   const groupSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { onCompetitionsLoaded, onRefereeSignalsChanged, onDevicesChanged } = callbacks;
-
-  const computeDeviceSlots = useCallback((rows: { position: number; last_seen_at: string }[]): ConnectedRefereeSlots => {
-    const now = Date.now();
-    const result: ConnectedRefereeSlots = { left: false, center: false, right: false };
-    for (const row of rows) {
-      const slot = POSITION_TO_SLOT[row.position];
-      if (!slot) continue;
-      const lastSeen = new Date(row.last_seen_at).getTime();
-      if (now - lastSeen <= REFEREE_DEVICE_TTL_MS) {
-        result[slot] = true;
-      }
-    }
-    return result;
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -334,10 +318,8 @@ export function useSupabaseSync(
       .subscribe();
 
     refreshSignals();
-    const pollInterval = window.setInterval(refreshSignals, 3000);
 
     return () => {
-      window.clearInterval(pollInterval);
       supabase.removeChannel(channel);
     };
   }, [activeCompetitionId, onRefereeSignalsChanged]);
@@ -345,36 +327,25 @@ export function useSupabaseSync(
   useEffect(() => {
     if (!activeCompetitionId) return;
 
-    const refreshDevices = async () => {
-      try {
-        const rows = await dbRefereeDevices.listForCompetition(activeCompetitionId);
-        onDevicesChanged(computeDeviceSlots(rows));
-      } catch {
-      }
-    };
-
     const channel = supabase
-      .channel(`referee-devices-${activeCompetitionId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "referee_devices",
-          filter: `competition_id=eq.${activeCompetitionId}`,
-        },
-        refreshDevices
-      )
+      .channel(`referee-presence-${activeCompetitionId}`)
+      .on("presence", { event: "sync" }, () => {
+        const state = channel.presenceState<{ position: number }>();
+        const slots: ConnectedRefereeSlots = { left: false, center: false, right: false };
+        for (const presences of Object.values(state)) {
+          for (const p of presences) {
+            const slot = POSITION_TO_SLOT[p.position];
+            if (slot) slots[slot] = true;
+          }
+        }
+        onDevicesChanged(slots);
+      })
       .subscribe();
 
-    refreshDevices();
-    const pollInterval = window.setInterval(refreshDevices, 3000);
-
     return () => {
-      window.clearInterval(pollInterval);
       supabase.removeChannel(channel);
     };
-  }, [activeCompetitionId, onDevicesChanged, computeDeviceSlots]);
+  }, [activeCompetitionId, onDevicesChanged]);
 
   const publishSignal = useCallback(
     async (position: number, signal: RefSignal) => {
@@ -394,28 +365,6 @@ export function useSupabaseSync(
     } catch {
     }
   }, [activeCompetitionId]);
-
-  const sendHeartbeat = useCallback(
-    async (position: number) => {
-      if (!activeCompetitionId) return;
-      try {
-        await dbRefereeDevices.heartbeat(activeCompetitionId, position, deviceId);
-      } catch {
-      }
-    },
-    [activeCompetitionId, deviceId]
-  );
-
-  const removeDevice = useCallback(
-    async (position: number) => {
-      if (!activeCompetitionId) return;
-      try {
-        await dbRefereeDevices.remove(activeCompetitionId, position);
-      } catch {
-      }
-    },
-    [activeCompetitionId]
-  );
 
   const createCompetitionInDb = useCallback(async (comp: CompetitionRecord) => {
     try {
@@ -442,8 +391,6 @@ export function useSupabaseSync(
   return {
     publishSignal,
     clearSignals,
-    sendHeartbeat,
-    removeDevice,
     createCompetitionInDb,
     deleteCompetitionFromDb,
     updateCompetitionNameInDb,

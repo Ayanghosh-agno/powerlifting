@@ -15,6 +15,7 @@ import {
 import { QRCodeSVG } from "qrcode.react";
 import indiaStateDistrictData from "../node_modules/india-states-districts/state_discripts.json";
 import { useSupabaseSync, type ConnectedRefereeSlots } from "./lib/useSupabaseSync";
+import { supabase } from "./lib/supabase";
 
 type LiftType = "squat" | "bench" | "deadlift";
 type AttemptStatus = "PENDING" | "GOOD" | "NO" | "UNATTEMPTED";
@@ -98,8 +99,6 @@ type AppContextValue = {
   resetSignals: () => void;
   connectedRefereeSlots: ConnectedRefereeSlots;
   publishRefereeSignal: (position: number, signal: RefSignal) => Promise<void>;
-  sendRefereeHeartbeat: (position: number) => Promise<void>;
-  removeRefereeDevice: (position: number) => Promise<void>;
 };
 
 type PersistedState = {
@@ -774,8 +773,6 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
   const {
     publishSignal,
     clearSignals,
-    sendHeartbeat,
-    removeDevice,
     createCompetitionInDb,
     deleteCompetitionFromDb,
     updateCompetitionNameInDb,
@@ -1507,8 +1504,6 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
         resetSignals,
         connectedRefereeSlots,
         publishRefereeSignal: publishSignal,
-        sendRefereeHeartbeat: sendHeartbeat,
-        removeRefereeDevice: removeDevice,
       }}
     >
       {children}
@@ -4056,14 +4051,7 @@ const RefereePage = () => {
     resetSignals,
     connectedRefereeSlots,
   } = useAppContext();
-  const [connectedCount, setConnectedCount] = useState(0);
-  const [presenceBySlot, setPresenceBySlot] = useState<RefereePresenceMap>({});
-
-  useEffect(() => {
-    const slots = connectedRefereeSlots;
-    const count = [slots.left, slots.center, slots.right].filter(Boolean).length;
-    setConnectedCount(count);
-  }, [connectedRefereeSlots]);
+  const connectedCount = [connectedRefereeSlots.left, connectedRefereeSlots.center, connectedRefereeSlots.right].filter(Boolean).length;
 
   useEffect(() => {
     const requestedCompetitionId = searchParams.get("cid");
@@ -4074,29 +4062,6 @@ const RefereePage = () => {
       }
     }
   }, [searchParams, activeCompetitionId, competitions, switchCompetition]);
-
-  useEffect(() => {
-    const syncPresence = () => {
-      const presence = readRefereePresence(activeCompetitionId);
-      setPresenceBySlot(presence);
-      const localCount = countConnectedReferees(activeCompetitionId);
-      if (localCount > 0) setConnectedCount(localCount);
-    };
-
-    syncPresence();
-    const interval = window.setInterval(syncPresence, 1000);
-    const handleStorage = (event: StorageEvent) => {
-      if (event.key === getRefereePresenceKey(activeCompetitionId)) {
-        syncPresence();
-      }
-    };
-
-    window.addEventListener("storage", handleStorage);
-    return () => {
-      window.clearInterval(interval);
-      window.removeEventListener("storage", handleStorage);
-    };
-  }, [activeCompetitionId]);
 
   const [qrModal, setQrModal] = useState<{ slot: RefereeSlot; title: string; url: string } | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
@@ -4210,10 +4175,7 @@ const RefereePage = () => {
       <div className="flex gap-4 overflow-x-auto pb-2">
         {REFEREE_SLOT_CONFIG.map((slot) => {
           const signal = refereeSignals[slot.index];
-          const localConnectedTs = presenceBySlot[slot.key];
-          const localConnected = typeof localConnectedTs === "number" && Date.now() - localConnectedTs <= REFEREE_PRESENCE_TTL_MS;
-          const dbConnected = connectedRefereeSlots[slot.key];
-          const isConnected = localConnected || dbConnected;
+          const isConnected = connectedRefereeSlots[slot.key];
           return (
             <button
               key={slot.key}
@@ -4310,8 +4272,6 @@ const RefereeStationPage = () => {
     refereeInputLocked,
     setRefereeInputLocked,
     publishRefereeSignal,
-    sendRefereeHeartbeat,
-    removeRefereeDevice,
   } = useAppContext();
   const [decisionEndsAt, setDecisionEndsAt] = useState<number | null>(null);
   const [pendingDecision, setPendingDecision] = useState<Exclude<RefSignal, null> | null>(null);
@@ -4355,29 +4315,19 @@ const RefereeStationPage = () => {
   useEffect(() => {
     if (!config || !activeCompetitionId) return;
 
-    const markActive = () => {
-      const presence = readRefereePresence(activeCompetitionId);
-      writeRefereePresence(activeCompetitionId, { ...presence, [config.key]: Date.now() });
-      sendRefereeHeartbeat(config.index);
-    };
-
-    const clearActive = () => {
-      const presence = readRefereePresence(activeCompetitionId);
-      delete presence[config.key];
-      writeRefereePresence(activeCompetitionId, presence);
-      removeRefereeDevice(config.index);
-    };
-
-    markActive();
-    const heartbeat = window.setInterval(markActive, REFEREE_HEARTBEAT_MS);
-    window.addEventListener("beforeunload", clearActive);
+    const channel = supabase
+      .channel(`referee-presence-${activeCompetitionId}`)
+      .subscribe(async (status) => {
+        if (status === "SUBSCRIBED") {
+          await channel.track({ position: config.index });
+        }
+      });
 
     return () => {
-      window.clearInterval(heartbeat);
-      window.removeEventListener("beforeunload", clearActive);
-      clearActive();
+      channel.untrack();
+      supabase.removeChannel(channel);
     };
-  }, [activeCompetitionId, config, sendRefereeHeartbeat, removeRefereeDevice]);
+  }, [activeCompetitionId, config]);
 
   useEffect(() => {
     if (!refereeInputLocked) return;
