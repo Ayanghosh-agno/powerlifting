@@ -36,7 +36,7 @@ type Lifter = {
   manualWeightClass: string;
   isEquipped: boolean;
   disqualified: boolean;
-  category: string;
+  category: string; 
   group: string;
   team: string;
   rackHeightSquat: number | "";
