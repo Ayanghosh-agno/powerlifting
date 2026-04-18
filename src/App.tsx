@@ -3179,7 +3179,7 @@ const LifterManagementPage = () => {
 };
 
 const GroupManagementPage = () => {
-  const { groups, setGroups, lifters, setLifters } = useAppContext();
+  const { groups, setGroups, lifters, setLifters, setCompetitionStarted, setCurrentLift, setCurrentAttemptIndex, setCurrentLifterId, setCompetitionMode } = useAppContext();
   const [groupName, setGroupName] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [activeGroupFilter, setActiveGroupFilter] = useState("");
@@ -3200,6 +3200,8 @@ const GroupManagementPage = () => {
   const [checkedLifterIds, setCheckedLifterIds] = useState<string[]>([]);
   const [bulkTargetGroupName, setBulkTargetGroupName] = useState(groups[0]?.name ?? "");
   const [doubleCategoryType, setDoubleCategoryType] = useState<"SUBJR_JR" | "JR_SR" | "SR_M1">("JR_SR");
+    const [startCompGroupId, setStartCompGroupId] = useState<string | null>(null);
+    const [compLifts, setCompLifts] = useState<Record<LiftType, boolean>>({ squat: true, bench: true, deadlift: true });
 
   const filteredGroups = useMemo(() => {
     const query = searchTerm.trim().toUpperCase();
@@ -3277,6 +3279,29 @@ const GroupManagementPage = () => {
     const updated = groups.map((group) => (group.id === groupId ? { ...group, currentLift: lift } : group));
     setGroups(updated);
     setGroupNotice(`Group stage updated to ${lift.toUpperCase()}.`);
+  };
+
+  const handleStartGroupCompetition = (group: Group) => {
+    const enabledLifts = (Object.entries(compLifts) as [LiftType, boolean][]).filter(([, v]) => v).map(([k]) => k);
+    if (enabledLifts.length === 0) {
+      setGroupNotice("Select at least one lift to start the competition.");
+      return;
+    }
+    const firstLift: LiftType = enabledLifts.includes("squat") ? "squat" : enabledLifts.includes("bench") ? "bench" : "deadlift";
+    const groupLifters = lifters.filter((l) => l.group === group.name && !l.disqualified);
+    if (groupLifters.length === 0) {
+      setGroupNotice("No lifters in this group to start a competition.");
+      return;
+    }
+    const newMode: CompetitionMode = enabledLifts.length === 1 && enabledLifts[0] === "bench" ? "BENCH_ONLY" : "FULL_GAME";
+    setCompetitionMode(newMode);
+    setCurrentLift(firstLift);
+    setCurrentAttemptIndex(0);
+    const orderedGroupLifters = orderLiftersByIPF(groupLifters, firstLift, 0);
+    if (orderedGroupLifters[0]) setCurrentLifterId(orderedGroupLifters[0].id);
+    setCompetitionStarted(true);
+    setStartCompGroupId(null);
+    setGroupNotice(`Competition started for Group ${group.name} — ${enabledLifts.map((l) => l.toUpperCase()).join(", ")}.`);
   };
 
   const saveEditGroup = () => {
@@ -3543,6 +3568,12 @@ const GroupManagementPage = () => {
                   ) : (
                     <>
                       <button
+                        onClick={() => setStartCompGroupId(startCompGroupId === group.id ? null : group.id)}
+                        className="rounded-lg bg-emerald-500 px-3 py-2 text-sm font-bold text-black"
+                      >
+                        Start Competition
+                      </button>
+                      <button
                         onClick={() => startEditGroup(group)}
                         className="rounded-lg bg-purple-500 px-3 py-2 text-sm font-semibold"
                       >
@@ -3555,6 +3586,38 @@ const GroupManagementPage = () => {
                         Delete
                       </button>
                     </>
+                  )}
+                  {startCompGroupId === group.id && (
+                    <div className="mt-3 w-full rounded-xl border border-emerald-400/40 bg-emerald-900/30 p-4">
+                      <p className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-emerald-300">Select Lifts to Compete</p>
+                      <div className="mb-3 flex flex-wrap gap-4">
+                        {(["squat", "bench", "deadlift"] as LiftType[]).map((lift) => (
+                          <label key={lift} className="flex cursor-pointer items-center gap-2 text-sm text-white">
+                            <input
+                              type="checkbox"
+                              checked={compLifts[lift]}
+                              onChange={(e) => setCompLifts((prev) => ({ ...prev, [lift]: e.target.checked }))}
+                              className="h-4 w-4 accent-emerald-400"
+                            />
+                            {lift === "squat" ? "Squats" : lift === "bench" ? "Bench Press" : "Deadlift"}
+                          </label>
+                        ))}
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleStartGroupCompetition(group)}
+                          className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-bold text-black"
+                        >
+                          Confirm Start
+                        </button>
+                        <button
+                          onClick={() => setStartCompGroupId(null)}
+                          className="rounded-lg bg-white/10 px-4 py-2 text-sm"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
                   )}
               </div>
             </div>
@@ -4222,11 +4285,26 @@ const ScreenPage = () => {
     timerPhase,
     timerEndsAt,
     nextAttemptQueue,
+    competitions,
+    activeCompetitionId,
   } = useAppContext();
   const [screenType, setScreenType] = useState("signal_results_plate");
 
   const openDisplayScreen = () => {
-    const url = `${window.location.origin}${window.location.pathname}#/display/full?layout=${screenType}&live=1`;
+    const activeCompetitionName =
+      competitions.find((c) => c.id === activeCompetitionId)?.name ?? "Competition";
+    const seededCompetition = normalizeCompetitionRecord({
+      id: activeCompetitionId ?? `comp-${Date.now()}`,
+      name: activeCompetitionName,
+      createdAt: Date.now(),
+      lifters, groups, currentLifterId, refereeSignals, refereeInputLocked,
+      currentLift, currentAttemptIndex, competitionStarted, includeCollars,
+      competitionMode, nextAttemptQueue, timerPhase, timerEndsAt,
+    });
+    const seedValue = encodeUrlSeed(seededCompetition);
+    const seedParam = seedValue ? `&seed=${encodeURIComponent(seedValue)}` : "";
+    const cidParam = activeCompetitionId ? `&cid=${encodeURIComponent(activeCompetitionId)}` : "";
+    const url = `${window.location.origin}${window.location.pathname}#/display/full?layout=${screenType}&live=1${cidParam}${seedParam}`;
     const popup = window.open(url, "_blank", "width=1280,height=720");
 
     if (!popup) return;
@@ -4704,6 +4782,7 @@ const DisplayFullPage = () => {
   const forceLive = searchParams.get("live") === "1";
   const [showSignalOverlay, setShowSignalOverlay] = useState(false);
   const [displaySignals, setDisplaySignals] = useState<RefSignal[]>([null, null, null]);
+  const [overlayPhase, setOverlayPhase] = useState<"circles" | "lift" | null>(null);
   const [displayTheme, setDisplayTheme] = useState<DisplayThemeKey>("black");
 
   const cycleDisplayTheme = () => {
@@ -4755,9 +4834,17 @@ const DisplayFullPage = () => {
   useEffect(() => {
     if (refereeSignals.every((signal) => signal !== null)) {
       setDisplaySignals(refereeSignals);
-      setShowSignalOverlay(true);
-      const timer = window.setTimeout(() => setShowSignalOverlay(false), 3400);
-      return () => window.clearTimeout(timer);
+      const allGood = refereeSignals.every((s) => s === "GOOD");
+      if (allGood) {
+        setOverlayPhase("circles");
+        const t1 = window.setTimeout(() => setOverlayPhase("lift"), 2000);
+        const t2 = window.setTimeout(() => { setOverlayPhase(null); }, 3000);
+        return () => { window.clearTimeout(t1); window.clearTimeout(t2); };
+      } else {
+        setShowSignalOverlay(true);
+        const t = window.setTimeout(() => setShowSignalOverlay(false), 3000);
+        return () => window.clearTimeout(t);
+      }
     }
     return undefined;
   }, [refereeSignals]);
@@ -4826,202 +4913,304 @@ const DisplayFullPage = () => {
     );
   }
 
-  // Keep display screen and results tab in the same dark table UI style.
+  // Viewport-fitted display screen — no page scroll, all content fits inside h-screen.
   if (["signal_results_plate", "signal_results", "order_attempts", "results_all"].includes(displayMode)) {
+    const hasPlate = displayMode === "signal_results_plate";
+    const hasSignals = ["signal_results_plate", "signal_results"].includes(displayMode);
     return (
-      <div className={displayRootClass} style={displayRootStyle}>
-        {!competitionStarted && !forceLive && (
-          <div
-            className={`mb-3 inline-block rounded border px-3 py-1 text-xs font-semibold ${
-              isDarkTheme
-                ? "border-amber-500/50 bg-amber-400/15 text-amber-200"
-                : "border-amber-600 bg-amber-100 text-amber-900"
-            }`}
-          >
-            Competition not started. Preview mode is active.
+      <div
+        className={`relative flex h-screen flex-col overflow-hidden ${activeTheme.rootClass}`}
+        style={displayRootStyle}
+      >
+        {/* ── Top header strip ── */}
+        <div className="flex-none border-b border-white/10 px-3 py-2 md:px-5 md:py-3">
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+            <p className="text-[clamp(0.95rem,2.2vw,1.6rem)] font-black uppercase leading-tight tracking-tight">
+              {currentLifter?.name || "NO LIFTER"}
+            </p>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 text-right">
+              <p className="text-[clamp(0.75rem,1.6vw,1.1rem)] font-semibold uppercase text-cyan-300">
+                {currentLift.toUpperCase()} · ATT {currentAttemptIndex + 1}
+              </p>
+              <p className="text-[clamp(0.9rem,2vw,1.4rem)] font-bold">
+                {loadingWeight.toFixed(1)} kg
+              </p>
+              {timerPhase === "ATTEMPT" && timerEndsAt && (
+                <p className="text-[clamp(0.8rem,1.8vw,1.2rem)] font-bold text-amber-300">
+                  ⏱ {Math.floor(displayTimerSeconds / 60)}:{String(displayTimerSeconds % 60).padStart(2, "0")}
+                </p>
+              )}
+            </div>
           </div>
-        )}
-        <p className="mb-2 text-center text-sm font-semibold uppercase tracking-[0.24em] text-cyan-300 md:text-base">
-          Design by SUMIT BHANJA
-        </p>
-        <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
-          <p className="text-[clamp(1.2rem,2.6vw,2.2rem)] font-bold">
-            {displayMode === "order_attempts" ? "Lifter Order With Attempts" : "Results (Live Display)"}
-          </p>
-          <p className="text-base font-semibold text-cyan-200 md:text-lg">
-            Next lifter: {currentLifter?.name || "-"} | {loadingWeight.toFixed(1)} kg
-          </p>
+          {!competitionStarted && !forceLive && (
+            <p className="mt-1 text-[10px] font-semibold uppercase tracking-widest text-amber-400">
+              Preview mode — competition not started
+            </p>
+          )}
         </div>
 
-        {timerPhase === "ATTEMPT" && timerEndsAt && (
-          <p className="mb-3 text-xl font-bold text-cyan-300">
-            Timer: {Math.floor(displayTimerSeconds / 60)}:{String(displayTimerSeconds % 60).padStart(2, "0")}
-          </p>
+        {/* ── Middle: plate + referee signal circles ── */}
+        {(hasPlate || hasSignals) && (
+          <div className="flex-none flex flex-wrap items-center gap-3 border-b border-white/10 px-3 py-2 md:px-5 md:py-3">
+            {hasPlate && (
+              <div className="flex-1 min-w-0">
+                <PlateStack weight={loadingWeight} includeCollars={includeCollars} />
+              </div>
+            )}
+            {hasSignals && (
+              <div className="flex flex-none items-center gap-3 md:gap-5">
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Referees</p>
+                {refereeSignals.map((signal, idx) => (
+                  <div
+                    key={idx}
+                    className={`h-10 w-10 rounded-full border-2 transition-all duration-300 md:h-14 md:w-14 ${
+                      signal === null
+                        ? "border-slate-600 bg-slate-800"
+                        : signal === "GOOD"
+                          ? "border-white bg-white shadow-[0_0_18px_rgba(255,255,255,0.8)]"
+                          : "border-red-500 bg-red-600 shadow-[0_0_18px_rgba(239,68,68,0.8)]"
+                    }`}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
         )}
 
-        {["signal_results_plate", "signal_results"].includes(displayMode) && (
-          <div className="mb-3">
-            {displayMode === "signal_results_plate" && (
-              <PlateStack weight={loadingWeight} includeCollars={includeCollars} />
-            )}
-            <div className="mt-2 flex flex-wrap gap-2">
-              {refereeSignals.map((signal, idx) => (
-                <div
-                  key={idx}
-                  className={`rounded-lg px-3 py-1 text-xs font-semibold ${
-                    signal === null
-                      ? "bg-slate-700 text-slate-200"
-                      : signal === "GOOD"
-                        ? "bg-emerald-500 text-black"
-                        : "bg-red-500 text-white"
-                  }`}
-                >
-                  Ref {idx + 1}: {signal ?? "PENDING"}
+        {/* ── Bottom: results / order table — scrolls internally ── */}
+        <div className="min-h-0 flex-1 overflow-auto px-3 py-2 md:px-5 md:py-3">
+          {displayMode === "order_attempts" ? (
+            <div className="flex h-full flex-col gap-3">
+              <div className="rounded-xl border border-white/20 bg-black/30 p-3 text-center">
+                <p className="text-[clamp(0.8rem,1.8vw,1.3rem)] font-semibold uppercase tracking-[0.2em] text-cyan-200">
+                  {currentLift.toUpperCase()} ATTEMPT {currentAttemptIndex + 1}
+                </p>
+              </div>
+              <div className="grid flex-none gap-2 md:grid-cols-3">
+                {orderedByCurrentRound.slice(0, 3).map((lifter, idx) => {
+                  const attemptWeight = getAttemptValue(lifter, currentLift, currentAttemptIndex);
+                  return (
+                    <div
+                      key={lifter.id}
+                      className={`rounded-xl border p-3 md:p-4 ${
+                        lifter.id === currentLifterId ? "border-cyan-300/80 bg-cyan-500/15" : "border-white/20 bg-black/30"
+                      }`}
+                    >
+                      <p className="text-[10px] font-semibold uppercase tracking-widest text-cyan-200">#{idx + 1}</p>
+                      <p className="mt-1 text-[clamp(1rem,2.5vw,2rem)] font-black uppercase leading-tight">{lifter.name || "-"}</p>
+                      <p className="mt-1 text-[clamp(0.9rem,2vw,1.6rem)] font-bold">
+                        {attemptWeight === null ? "-" : `${attemptWeight.toFixed(1)} kg`}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-300">
+                        BW {typeof lifter.bodyweight === "number" ? lifter.bodyweight : "-"} · Lot {typeof lifter.lot === "number" ? lifter.lot : "-"}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="rounded-xl border border-white/15 bg-black/20 p-3">
+                <p className="mb-2 text-[10px] uppercase tracking-widest text-cyan-300">Other Lifters</p>
+                <div className="space-y-1">
+                  {orderedByCurrentRound.slice(3).map((lifter, idx) => {
+                    const attemptWeight = getAttemptValue(lifter, currentLift, currentAttemptIndex);
+                    return (
+                      <div
+                        key={lifter.id}
+                        className={`flex items-center justify-between rounded-lg border px-3 py-1.5 text-sm ${
+                          lifter.id === currentLifterId ? "border-cyan-300/70 bg-cyan-500/10" : "border-white/10 bg-white/5"
+                        }`}
+                      >
+                        <span className="font-semibold">{idx + 4}. {lifter.name}</span>
+                        <span className="text-slate-300 text-xs">
+                          {attemptWeight === null ? "-" : `${attemptWeight.toFixed(1)} kg`} · BW {typeof lifter.bodyweight === "number" ? lifter.bodyweight : "-"} · Lot {typeof lifter.lot === "number" ? lifter.lot : "-"}
+                        </span>
+                      </div>
+                    );
+                  })}
+                  {orderedByCurrentRound.length === 0 && (
+                    <p className="text-sm text-slate-400">No lifters added yet.</p>
+                  )}
                 </div>
+              </div>
+            </div>
+          ) : (
+            <div className="h-full overflow-auto rounded-xl border border-white/15 bg-black/20">
+              <table className="w-full min-w-[900px] text-xs md:text-sm">
+                <thead className="sticky top-0 bg-slate-900 text-left text-slate-300">
+                  <tr>
+                    <th className="px-3 py-2">#</th>
+                    <th className="px-3 py-2">Lifter</th>
+                    <th className="px-3 py-2 hidden md:table-cell">Group</th>
+                    <th className="px-3 py-2 hidden md:table-cell">Team</th>
+                    <th className="px-3 py-2">SQ1</th>
+                    <th className="px-3 py-2">SQ2</th>
+                    <th className="px-3 py-2">SQ3</th>
+                    <th className="px-3 py-2">BP1</th>
+                    <th className="px-3 py-2">BP2</th>
+                    <th className="px-3 py-2">BP3</th>
+                    <th className="px-3 py-2">DL1</th>
+                    <th className="px-3 py-2">DL2</th>
+                    <th className="px-3 py-2">DL3</th>
+                    <th className="px-3 py-2 font-semibold">Total</th>
+                    <th className="px-3 py-2 hidden md:table-cell">GL</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ranking.map((lifter, idx) => (
+                    <tr
+                      key={lifter.id}
+                      className={`border-t border-white/10 ${lifter.id === currentLifterId ? "bg-cyan-500/10" : ""}`}
+                    >
+                      <td className="px-3 py-2">{idx + 1}</td>
+                      <td className="px-3 py-2 font-semibold">{lifter.name || "-"}</td>
+                      <td className="px-3 py-2 hidden md:table-cell">{lifter.group || "-"}</td>
+                      <td className="px-3 py-2 hidden md:table-cell">{lifter.team || "-"}</td>
+                      <AttemptDisplayCell attempt={lifter.squatAttempts[0]} />
+                      <AttemptDisplayCell attempt={lifter.squatAttempts[1]} />
+                      <AttemptDisplayCell attempt={lifter.squatAttempts[2]} />
+                      <AttemptDisplayCell attempt={lifter.benchAttempts[0]} />
+                      <AttemptDisplayCell attempt={lifter.benchAttempts[1]} />
+                      <AttemptDisplayCell attempt={lifter.benchAttempts[2]} />
+                      <AttemptDisplayCell attempt={lifter.deadliftAttempts[0]} />
+                      <AttemptDisplayCell attempt={lifter.deadliftAttempts[1]} />
+                      <AttemptDisplayCell attempt={lifter.deadliftAttempts[2]} />
+                      <td className="px-3 py-2 font-semibold">{lifter.total} kg</td>
+                      <td className="px-3 py-2 hidden md:table-cell">{lifter.points}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* ── IPF Good Lift: Phase 1 — 3 white circles (2 s) ── */}
+        {overlayPhase === "circles" && (
+          <div className="pointer-events-none fixed inset-0 z-50 flex flex-col items-center justify-center bg-black">
+            <div className="flex gap-6 md:gap-12 lg:gap-20">
+              {[0, 1, 2].map((idx) => (
+                <motion.div
+                  key={idx}
+                  initial={{ scale: 0, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ delay: idx * 0.28, type: "spring", stiffness: 220, damping: 14 }}
+                  className="h-24 w-24 rounded-full bg-white shadow-[0_0_80px_rgba(255,255,255,0.95)] md:h-40 md:w-40 lg:h-52 lg:w-52"
+                />
+              ))}
+            </div>
+            <motion.p
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.9, duration: 0.4 }}
+              className="mt-10 text-[clamp(1.4rem,4vw,3rem)] font-black uppercase tracking-[0.35em] text-white"
+            >
+              GOOD LIFT
+            </motion.p>
+          </div>
+        )}
+
+        {/* ── IPF Good Lift: Phase 2 — lift-specific animation (1.5 s) ── */}
+        {overlayPhase === "lift" && (
+          <div className="pointer-events-none fixed inset-0 z-50 flex flex-col items-center justify-center bg-black">
+            <motion.div
+              initial={{ scale: 0.6, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ type: "spring", stiffness: 280, damping: 16 }}
+              className="flex flex-col items-center gap-6 text-center"
+            >
+              <p className="text-[clamp(3rem,10vw,7rem)] font-black uppercase leading-none tracking-tight text-white">
+                GOOD LIFT
+              </p>
+
+              {currentLift === "bench" && (
+                <div className="relative flex items-center justify-center">
+                  <motion.div
+                    animate={{ y: [0, -30, 0, -20, 0] }}
+                    transition={{ duration: 1.4, ease: "easeInOut" }}
+                    className="relative flex items-center"
+                  >
+                    <div className="h-6 w-6 rounded bg-amber-400 md:h-8 md:w-8" />
+                    <div className="h-3 w-32 rounded-full bg-white md:h-4 md:w-56" />
+                    <div className="h-6 w-6 rounded bg-amber-400 md:h-8 md:w-8" />
+                  </motion.div>
+                </div>
+              )}
+
+              {currentLift === "squat" && (
+                <div className="flex items-end justify-center gap-6">
+                  <motion.div
+                    animate={{ scaleY: [0.5, 1, 0.5, 1] }}
+                    style={{ transformOrigin: "bottom", height: "clamp(60px,10vw,120px)" }}
+                    transition={{ duration: 1.4, ease: "easeInOut" }}
+                    className="w-10 rounded-t-full bg-white md:w-16"
+                  />
+                  <motion.div
+                    animate={{ scaleY: [0.5, 1, 0.5, 1] }}
+                    style={{ transformOrigin: "bottom", height: "clamp(80px,12vw,140px)" }}
+                    transition={{ duration: 1.4, ease: "easeInOut", delay: 0.05 }}
+                    className="w-10 rounded-t-full bg-cyan-400 md:w-16"
+                  />
+                  <motion.div
+                    animate={{ scaleY: [0.5, 1, 0.5, 1] }}
+                    style={{ transformOrigin: "bottom", height: "clamp(60px,10vw,120px)" }}
+                    transition={{ duration: 1.4, ease: "easeInOut", delay: 0.1 }}
+                    className="w-10 rounded-t-full bg-white md:w-16"
+                  />
+                </div>
+              )}
+
+              {currentLift === "deadlift" && (
+                <div className="flex items-center justify-center">
+                  <motion.div
+                    animate={{ y: [30, -30] }}
+                    transition={{ duration: 1.3, ease: "easeOut" }}
+                    className="relative flex items-center"
+                  >
+                    <div className="h-8 w-8 rounded-full border-4 border-amber-400 bg-transparent md:h-12 md:w-12" />
+                    <div className="h-3 w-40 rounded-full bg-white md:h-4 md:w-64" />
+                    <div className="h-8 w-8 rounded-full border-4 border-amber-400 bg-transparent md:h-12 md:w-12" />
+                  </motion.div>
+                </div>
+              )}
+
+              <p className="text-[clamp(1rem,3vw,2rem)] font-bold uppercase tracking-[0.3em] text-cyan-300">
+                {currentLift === "bench" ? "BENCH PRESS" : currentLift === "squat" ? "SQUAT" : "DEADLIFT"}
+              </p>
+            </motion.div>
+          </div>
+        )}
+
+        {/* ── NO lift overlay — full-screen colored circles ── */}
+        {showSignalOverlay && (
+          <div className="pointer-events-none fixed inset-0 z-50 flex flex-col items-center justify-center bg-black">
+            <motion.p
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-10 text-[clamp(2rem,6vw,4.5rem)] font-black uppercase tracking-[0.25em] text-red-400"
+            >
+              NO LIFT
+            </motion.p>
+            <div className="flex gap-6 md:gap-12 lg:gap-20">
+              {displaySignals.map((signal, idx) => (
+                <motion.div
+                  key={idx}
+                  initial={{ scale: 0, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ delay: idx * 0.2, type: "spring", stiffness: 220, damping: 14 }}
+                  className={`h-24 w-24 rounded-full md:h-40 md:w-40 lg:h-52 lg:w-52 ${
+                    signal === "NO"
+                      ? "bg-red-600 shadow-[0_0_80px_rgba(239,68,68,0.95)]"
+                      : "bg-white shadow-[0_0_80px_rgba(255,255,255,0.9)]"
+                  }`}
+                />
               ))}
             </div>
           </div>
         )}
 
-        {displayMode === "order_attempts" ? (
-          <div className="space-y-4">
-            <div className="rounded-2xl border border-white/20 bg-black/30 p-4 text-center md:p-6">
-              <p className="text-lg font-semibold uppercase tracking-[0.2em] text-cyan-200 md:text-2xl">
-                {currentLift.toUpperCase()} ATTEMPT {currentAttemptIndex + 1}
-              </p>
-            </div>
-
-            <div className="grid gap-3 md:grid-cols-3">
-              {orderedByCurrentRound.slice(0, 3).map((lifter, idx) => {
-                const attemptWeight = getAttemptValue(lifter, currentLift, currentAttemptIndex);
-                return (
-                  <div
-                    key={lifter.id}
-                    className={`rounded-2xl border p-4 md:p-5 ${
-                      lifter.id === currentLifterId ? "border-cyan-300/80 bg-cyan-500/15" : "border-white/20 bg-black/30"
-                    }`}
-                  >
-                    <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-200">#{idx + 1} in order</p>
-                    <p className="mt-2 text-4xl font-black uppercase leading-tight md:text-5xl">{lifter.name || "-"}</p>
-                    <p className="mt-2 text-3xl font-bold md:text-4xl">
-                      {attemptWeight === null ? "-" : `${attemptWeight.toFixed(1)} kg`}
-                    </p>
-                    <p className="mt-2 text-sm text-slate-200">
-                      BW {typeof lifter.bodyweight === "number" ? lifter.bodyweight : "-"} | Lot {typeof lifter.lot === "number" ? lifter.lot : "-"}
-                    </p>
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="rounded-2xl border border-white/15 bg-black/20 p-3 md:p-4">
-              <p className="mb-3 text-xs uppercase tracking-[0.2em] text-cyan-300">
-                Other Lifters (Order By Attempt: Low To High, BW, Lot)
-              </p>
-              <div className="space-y-2">
-                {orderedByCurrentRound.slice(3).map((lifter, idx) => {
-                  const attemptWeight = getAttemptValue(lifter, currentLift, currentAttemptIndex);
-                  return (
-                    <div
-                      key={lifter.id}
-                      className={`flex items-center justify-between rounded-lg border px-3 py-2 ${
-                        lifter.id === currentLifterId ? "border-cyan-300/70 bg-cyan-500/10" : "border-white/15 bg-white/5"
-                      }`}
-                    >
-                      <p className="text-sm font-semibold md:text-base">
-                        {idx + 4}. {lifter.name}
-                      </p>
-                      <p className="text-xs text-slate-200 md:text-sm">
-                        {attemptWeight === null ? "-" : `${attemptWeight.toFixed(1)} kg`} | BW {typeof lifter.bodyweight === "number" ? lifter.bodyweight : "-"} | Lot {typeof lifter.lot === "number" ? lifter.lot : "-"}
-                      </p>
-                    </div>
-                  );
-                })}
-                {orderedByCurrentRound.length === 0 && (
-                  <p className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-300">No lifters added yet.</p>
-                )}
-                {orderedByCurrentRound.length > 0 && orderedByCurrentRound.length < 4 && (
-                  <p className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-300">No other lifters in this attempt order.</p>
-                )}
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="overflow-x-auto rounded-2xl border border-white/15 bg-black/20">
-            <table className="min-w-[1600px] text-sm">
-              <thead className="bg-white/5 text-left text-slate-300">
-                <tr>
-                  <th className="px-4 py-3">Rank</th>
-                  <th className="px-4 py-3">Lifter</th>
-                  <th className="px-4 py-3">Group</th>
-                  <th className="px-4 py-3">Team</th>
-                  <th className="px-4 py-3">SQ1</th>
-                  <th className="px-4 py-3">SQ2</th>
-                  <th className="px-4 py-3">SQ3</th>
-                  <th className="px-4 py-3">BP1</th>
-                  <th className="px-4 py-3">BP2</th>
-                  <th className="px-4 py-3">BP3</th>
-                  <th className="px-4 py-3">DL1</th>
-                  <th className="px-4 py-3">DL2</th>
-                  <th className="px-4 py-3">DL3</th>
-                  <th className="px-4 py-3">Total</th>
-                  <th className="px-4 py-3">GL</th>
-                </tr>
-              </thead>
-              <tbody>
-                {ranking.map((lifter, idx) => (
-                  <tr
-                    key={lifter.id}
-                    className={`border-t border-white/10 ${lifter.id === currentLifterId ? "bg-cyan-500/10" : ""}`}
-                  >
-                    <td className="px-4 py-3">{idx + 1}</td>
-                    <td className="px-4 py-3 font-semibold">{lifter.name || "-"}</td>
-                    <td className="px-4 py-3">{lifter.group || "-"}</td>
-                    <td className="px-4 py-3">{lifter.team || "-"}</td>
-                    <AttemptDisplayCell attempt={lifter.squatAttempts[0]} />
-                    <AttemptDisplayCell attempt={lifter.squatAttempts[1]} />
-                    <AttemptDisplayCell attempt={lifter.squatAttempts[2]} />
-                    <AttemptDisplayCell attempt={lifter.benchAttempts[0]} />
-                    <AttemptDisplayCell attempt={lifter.benchAttempts[1]} />
-                    <AttemptDisplayCell attempt={lifter.benchAttempts[2]} />
-                    <AttemptDisplayCell attempt={lifter.deadliftAttempts[0]} />
-                    <AttemptDisplayCell attempt={lifter.deadliftAttempts[1]} />
-                    <AttemptDisplayCell attempt={lifter.deadliftAttempts[2]} />
-                    <td className="px-4 py-3 font-semibold">{lifter.total} kg</td>
-                    <td className="px-4 py-3">{lifter.points}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {showSignalOverlay && (
-          <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-black/25">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.92 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0 }}
-              className="rounded-2xl border border-white/30 bg-black/75 p-6"
-            >
-              <p className="mb-4 text-center text-xl font-bold text-white">Referee Decision</p>
-              <div className="flex gap-5">
-                {displaySignals.map((signal, idx) => (
-                  <div
-                    key={idx}
-                    className={`h-20 w-20 rounded-full ${
-                      signal === "NO" ? "bg-red-500 shadow-[0_0_24px_rgba(239,68,68,0.85)]" : "bg-emerald-400 shadow-[0_0_24px_rgba(16,185,129,0.85)]"
-                    }`}
-                  />
-                ))}
-              </div>
-            </motion.div>
-          </div>
-        )}
-
         <button
           onClick={cycleDisplayTheme}
-          className={themeButtonClass}
+          className={themeButtonClass.replace("top-4", "bottom-4")}
         >
           Theme: {activeTheme.label}
         </button>
