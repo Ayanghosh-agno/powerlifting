@@ -4093,32 +4093,9 @@ const RefereePage = () => {
   });
 
   const buildRefereeLink = (slot: RefereeSlot) => {
-    const activeCompetitionName =
-      competitions.find((competition) => competition.id === activeCompetitionId)?.name ?? "Competition";
-    const seededCompetition = normalizeCompetitionRecord({
-      id: activeCompetitionId ?? `comp-${Date.now()}`,
-      name: activeCompetitionName,
-      createdAt: Date.now(),
-      lifters,
-      groups,
-      currentLifterId,
-      refereeSignals,
-      refereeInputLocked,
-      currentLift,
-      currentAttemptIndex,
-      competitionStarted,
-      includeCollars,
-      competitionMode,
-      nextAttemptQueue,
-      timerPhase,
-      timerEndsAt,
-      activeCompetitionGroupName,
-    });
-    const seedValue = encodeUrlSeed(seededCompetition);
-    const seedParam = seedValue ? `&seed=${encodeURIComponent(seedValue)}` : "";
-    const cidParam = activeCompetitionId ? `&cid=${encodeURIComponent(activeCompetitionId)}` : "";
-    const url = `${window.location.origin}${window.location.pathname}#/signals/${slot}?live=1${cidParam}${seedParam}`;
-    return { url, seedValue };
+    const cidParam = activeCompetitionId ? `?cid=${encodeURIComponent(activeCompetitionId)}` : "";
+    const url = `${window.location.origin}${window.location.pathname}#/signals/${slot}${cidParam}`;
+    return { url, seedValue: "" };
   };
 
   const openRefereeScreen = (slot: RefereeSlot) => {
