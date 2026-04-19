@@ -1091,25 +1091,25 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     publishRemotePatch(next);
   }, [isDisplayScreen, publishRemotePatch]);
 
-  useEffect(() => {
-    initializeStateManager(broadcast);
-  }, [broadcast]);
-
-  const setTimerState = (phase: TimerPhase, endsAt: number | null) => {
+  const setTimerState = useCallback((phase: TimerPhase, endsAt: number | null) => {
     setTimerPhaseState(phase);
     setTimerEndsAtState(endsAt);
     broadcast({ timerPhase: phase, timerEndsAt: endsAt });
-  };
+  }, [broadcast]);
 
-  const setActiveCompetitionGroupName = (name: string | null) => {
+  const setActiveCompetitionGroupName = useCallback((name: string | null) => {
     setActiveCompetitionGroupNameState(name);
     broadcast({ activeCompetitionGroupName: name });
-  };
+  }, [broadcast]);
 
-  const setNextAttemptQueue = (queue: NextAttemptEntry[]) => {
+  const setNextAttemptQueue = useCallback((queue: NextAttemptEntry[]) => {
     setNextAttemptQueueState(queue);
     broadcast({ nextAttemptQueue: queue });
-  };
+  }, [broadcast]);
+
+  useEffect(() => {
+    initializeStateManager(broadcast);
+  }, [broadcast]);
 
   const activeCompetition =
     competitions.find((competition) => competition.id === activeCompetitionId) ?? null;
