@@ -3422,6 +3422,7 @@ const GroupManagementPage = () => {
   const [selectedWeightClassFilter, setSelectedWeightClassFilter] = useState("");
   const [selectedWeightClasses, setSelectedWeightClasses] = useState<Set<string>>(new Set());
   const [selectedCategories, setSelectedCategories] = useState<Set<string>>(new Set());
+  const [showGroupSuggestions, setShowGroupSuggestions] = useState(false);
 
   const showNotice = (text: string, type: "info" | "success" | "error" = "success") => {
     if (noticeTimerRef.current) window.clearTimeout(noticeTimerRef.current);
@@ -3724,55 +3725,68 @@ const GroupManagementPage = () => {
 
           {lifters.length > 0 && (
             <div className="mt-4 space-y-3">
-              <div className="rounded-lg border border-cyan-400/30 bg-cyan-400/5 p-3">
-                <p className="mb-3 text-xs font-semibold text-cyan-300">Weight Classes</p>
-                <div className="space-y-2 max-h-32 overflow-y-auto">
-                  {availableWeightClasses.map((wc) => (
-                    <label key={wc} className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={selectedWeightClasses.has(wc)}
-                        onChange={(e) => {
-                          const updated = new Set(selectedWeightClasses);
-                          if (e.target.checked) {
-                            updated.add(wc);
-                          } else {
-                            updated.delete(wc);
-                          }
-                          setSelectedWeightClasses(updated);
-                        }}
-                        className="h-4 w-4 rounded border-white/30 bg-white/5 accent-cyan-500"
-                      />
-                      <span className="text-sm text-slate-300">{wc}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
+              <button
+                onClick={() => setShowGroupSuggestions(!showGroupSuggestions)}
+                className="w-full rounded-lg border border-cyan-400/30 bg-cyan-400/5 p-3 text-left transition-colors hover:bg-cyan-400/10"
+              >
+                <p className="text-xs font-semibold text-cyan-300">
+                  {showGroupSuggestions ? "▼ Hide Group Suggestions" : "▶ Show Group Suggestions"}
+                </p>
+              </button>
 
-              <div className="rounded-lg border border-cyan-400/30 bg-cyan-400/5 p-3">
-                <p className="mb-3 text-xs font-semibold text-cyan-300">Categories</p>
-                <div className="space-y-2">
-                  {categories.map((cat) => (
-                    <label key={cat} className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={selectedCategories.has(cat)}
-                        onChange={(e) => {
-                          const updated = new Set(selectedCategories);
-                          if (e.target.checked) {
-                            updated.add(cat);
-                          } else {
-                            updated.delete(cat);
-                          }
-                          setSelectedCategories(updated);
-                        }}
-                        className="h-4 w-4 rounded border-white/30 bg-white/5 accent-cyan-500"
-                      />
-                      <span className="text-sm text-slate-300">{cat}</span>
-                    </label>
-                  ))}
+              {showGroupSuggestions && (
+                <div className="space-y-3">
+                  <div className="rounded-lg border border-cyan-400/30 bg-cyan-400/5 p-3">
+                    <p className="mb-3 text-xs font-semibold text-cyan-300">Weight Classes</p>
+                    <div className="space-y-2 max-h-32 overflow-y-auto">
+                      {availableWeightClasses.map((wc) => (
+                        <label key={wc} className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={selectedWeightClasses.has(wc)}
+                            onChange={(e) => {
+                              const updated = new Set(selectedWeightClasses);
+                              if (e.target.checked) {
+                                updated.add(wc);
+                              } else {
+                                updated.delete(wc);
+                              }
+                              setSelectedWeightClasses(updated);
+                            }}
+                            className="h-4 w-4 rounded border-white/30 bg-white/5 accent-cyan-500"
+                          />
+                          <span className="text-sm text-slate-300">{wc}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-cyan-400/30 bg-cyan-400/5 p-3">
+                    <p className="mb-3 text-xs font-semibold text-cyan-300">Categories</p>
+                    <div className="space-y-2">
+                      {categories.map((cat) => (
+                        <label key={cat} className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={selectedCategories.has(cat)}
+                            onChange={(e) => {
+                              const updated = new Set(selectedCategories);
+                              if (e.target.checked) {
+                                updated.add(cat);
+                              } else {
+                                updated.delete(cat);
+                              }
+                              setSelectedCategories(updated);
+                            }}
+                            className="h-4 w-4 rounded border-white/30 bg-white/5 accent-cyan-500"
+                          />
+                          <span className="text-sm text-slate-300">{cat}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
                 </div>
-              </div>
+              )}
 
               <div className="flex gap-2">
                 <button
