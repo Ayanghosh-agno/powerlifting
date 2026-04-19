@@ -788,7 +788,8 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
       setCurrentAttemptIndexState(empty.currentAttemptIndex);
       setCompetitionStartedState(empty.competitionStarted);
       setIncludeCollarsState(empty.includeCollars);
-      setTimerState(empty.timerPhase, empty.timerEndsAt);
+      setTimerPhaseState(empty.timerPhase);
+      setTimerEndsAtState(empty.timerEndsAt);
       setCompetitionModeState(empty.competitionMode);
       setNextAttemptQueueState(empty.nextAttemptQueue);
       setActiveCompetitionGroupNameState(empty.activeCompetitionGroupName);
@@ -804,7 +805,8 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     setCurrentAttemptIndexState(competition.currentAttemptIndex);
     setCompetitionStartedState(competition.competitionStarted);
     setIncludeCollarsState(competition.includeCollars);
-    setTimerState(competition.timerPhase, competition.timerEndsAt);
+    setTimerPhaseState(competition.timerPhase);
+    setTimerEndsAtState(competition.timerEndsAt);
     setCompetitionModeState(competition.competitionMode);
     setNextAttemptQueueState(competition.nextAttemptQueue);
     setActiveCompetitionGroupNameState(competition.activeCompetitionGroupName ?? null);
