@@ -3418,6 +3418,8 @@ const GroupManagementPage = () => {
   const [showAddLifterPanel, setShowAddLifterPanel] = useState(false);
   const [selectedLifterId, setSelectedLifterId] = useState(lifters[0]?.id ?? "");
   const [selectedGroupName, setSelectedGroupName] = useState(groups[0]?.name ?? "");
+  const [lifterSearchTerm, setLifterSearchTerm] = useState("");
+  const [selectedWeightClassFilter, setSelectedWeightClassFilter] = useState("");
 
   const showNotice = (text: string, type: "info" | "success" | "error" = "success") => {
     if (noticeTimerRef.current) window.clearTimeout(noticeTimerRef.current);
@@ -3434,9 +3436,35 @@ const GroupManagementPage = () => {
   }, [groups, searchTerm]);
 
   const visibleLifters = useMemo(() => {
-    if (!activeGroupFilter) return lifters;
-    return lifters.filter((l) => isInGroup(l.group, activeGroupFilter));
-  }, [lifters, activeGroupFilter]);
+    let filtered = lifters;
+
+    if (activeGroupFilter) {
+      filtered = filtered.filter((l) => isInGroup(l.group, activeGroupFilter));
+    }
+
+    if (lifterSearchTerm.trim()) {
+      const query = lifterSearchTerm.trim().toUpperCase();
+      filtered = filtered.filter((l) => l.name.toUpperCase().includes(query));
+    }
+
+    if (selectedWeightClassFilter) {
+      filtered = filtered.filter((l) => l.weightClass === selectedWeightClassFilter);
+    }
+
+    return filtered;
+  }, [lifters, activeGroupFilter, lifterSearchTerm, selectedWeightClassFilter]);
+
+  const availableWeightClasses = useMemo(() => {
+    const classes = new Set<string>();
+    visibleLifters.forEach((l) => {
+      if (l.weightClass) classes.add(l.weightClass);
+    });
+    return Array.from(classes).sort((a, b) => {
+      const aNum = parseFloat(a);
+      const bNum = parseFloat(b);
+      return aNum - bNum;
+    });
+  }, [visibleLifters]);
 
   useEffect(() => {
     if (!lifters.length) { setSelectedLifterId(""); return; }
@@ -3928,6 +3956,30 @@ const GroupManagementPage = () => {
                 </button>
               ))}
             </div>
+          )}
+        </div>
+
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+          <div className="w-full sm:w-64">
+            <Field
+              value={lifterSearchTerm}
+              placeholder="Search lifter names..."
+              onChange={(e) => setLifterSearchTerm(e.target.value)}
+            />
+          </div>
+          {availableWeightClasses.length > 0 && (
+            <select
+              value={selectedWeightClassFilter}
+              onChange={(e) => setSelectedWeightClassFilter(e.target.value)}
+              className="h-10 rounded-xl border border-white/15 bg-black/40 px-3 text-sm text-white focus:border-cyan-400/60 focus:outline-none"
+            >
+              <option value="">All Weight Classes</option>
+              {availableWeightClasses.map((wc) => (
+                <option key={wc} value={wc} className="bg-slate-900">
+                  {wc}
+                </option>
+              ))}
+            </select>
           )}
         </div>
 
