@@ -5579,17 +5579,20 @@ const DbSetupBanner = () => {
   const [show, setShow] = useState(false);
 
   useEffect(() => {
+    let interval: number;
     const check = async () => {
       try {
         const { supabase } = await import("./lib/supabase");
         const { error } = await supabase.from("competitions").select("id").limit(1).maybeSingle();
-        setDbReady(!error || error.code !== "PGRST205");
+        const ready = !error || error.code !== "PGRST205";
+        setDbReady(ready);
+        if (ready) window.clearInterval(interval);
       } catch {
         setDbReady(false);
       }
     };
     check();
-    const interval = window.setInterval(check, 5000);
+    interval = window.setInterval(check, 5000);
     return () => window.clearInterval(interval);
   }, []);
 
