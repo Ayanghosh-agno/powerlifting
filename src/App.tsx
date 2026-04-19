@@ -238,6 +238,15 @@ const getGroupArray = (group: string | string[]): string[] => {
   return Array.isArray(group) ? group : [group];
 };
 
+const getGroupSortOrder = (groupName: string): number => {
+  const upper = groupName.toUpperCase();
+  if (upper.includes("SUB") && upper.includes("JUNIOR")) return 0;
+  if (upper.includes("JUNIOR")) return 1;
+  if (upper.includes("SENIOR")) return 2;
+  if (upper.includes("MASTER")) return 3;
+  return 100;
+};
+
 const REFEREE_SLOT_CONFIG: { key: RefereeSlot; label: string; index: number }[] = [
   { key: "left", label: "Left", index: 0 },
   { key: "center", label: "Center", index: 1 },
@@ -5321,7 +5330,7 @@ const DisplayFullPage = () => {
         }
       }
     });
-    return Array.from(seen).sort();
+    return Array.from(seen).sort((a, b) => getGroupSortOrder(a) - getGroupSortOrder(b));
   }, [lifters]);
 
   const rankingByGroup = useMemo(() => {
