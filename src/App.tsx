@@ -2911,7 +2911,7 @@ const LifterManagementPage = () => {
             )}
             {groups.map((g) => (
               <option key={g.id} value={g.name} className="bg-slate-900">
-                Group {g.name}
+                {g.name}
               </option>
             ))}
           </select>
@@ -3218,7 +3218,7 @@ const LifterManagementPage = () => {
                         <option value="" className="bg-slate-900">No Group</option>
                         {groups.map((g) => (
                           <option key={g.id} value={g.name} className="bg-slate-900">
-                            Group {g.name}
+                            {g.name}
                           </option>
                         ))}
                       </select>
@@ -3827,7 +3827,7 @@ const GroupManagementPage = () => {
                     >
                       {groups.length === 0 && <option value="">No groups yet</option>}
                       {groups.map((g) => (
-                        <option key={g.id} value={g.name} className="bg-slate-900">Group {g.name}</option>
+                        <option key={g.id} value={g.name} className="bg-slate-900">{g.name}</option>
                       ))}
                     </select>
                   </div>
@@ -3892,7 +3892,7 @@ const GroupManagementPage = () => {
                           className="h-8 w-40 rounded-lg border border-cyan-400/60 bg-black/40 px-2 text-sm font-semibold text-white focus:outline-none"
                         />
                       ) : (
-                        <p className="font-semibold text-white">Group {group.name}</p>
+                        <p className="font-semibold text-white">{group.name}</p>
                       )}
                       <p className="text-xs text-slate-400">{groupLifterCount} lifter{groupLifterCount !== 1 ? "s" : ""}</p>
                     </div>
@@ -4038,7 +4038,7 @@ const GroupManagementPage = () => {
               <option value="">All Groups</option>
               {groups.map((g) => (
                 <option key={g.id} value={g.name} className="bg-slate-900">
-                  Group {g.name}
+                  {g.name}
                 </option>
               ))}
             </select>
@@ -4070,7 +4070,7 @@ const GroupManagementPage = () => {
               >
                 <option value="">Select group</option>
                 {groups.map((g) => (
-                  <option key={g.id} value={g.name} className="bg-slate-900">Group {g.name}</option>
+                  <option key={g.id} value={g.name} className="bg-slate-900">{g.name}</option>
                 ))}
               </select>
               <button onClick={moveCheckedLiftersToGroup} className="rounded-lg bg-cyan-500 px-3 py-1 text-xs font-semibold text-black hover:bg-cyan-400">
@@ -4152,11 +4152,11 @@ const GroupManagementPage = () => {
                           className="h-9 min-w-28 rounded-lg border border-white/20 bg-black/40 px-2 text-sm focus:outline-none"
                         >
                           <option value="" className="bg-slate-900">Ungrouped</option>
-                          {groups.map((g) => <option key={g.id} value={g.name} className="bg-slate-900">Group {g.name}</option>)}
+                          {groups.map((g) => <option key={g.id} value={g.name} className="bg-slate-900">{g.name}</option>)}
                         </select>
                       ) : (
                         <span className={`rounded-md px-2 py-0.5 text-xs ${l.group ? "bg-white/8 text-slate-200" : "text-slate-500"}`}>
-                          {l.group ? `Group ${l.group}` : "Ungrouped"}
+                          {l.group || "Ungrouped"}
                         </span>
                       )}
                     </td>
