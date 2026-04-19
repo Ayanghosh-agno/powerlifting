@@ -1,4 +1,5 @@
 import { supabase } from "./supabase";
+import type { DbRefereeSession, DbSignalHistory } from "./types";
 
 export type DbCompetition = {
   id: string;
@@ -244,5 +245,118 @@ export const dbRefereeDevices = {
       .eq("competition_id", competitionId)
       .eq("position", position);
     if (error) throw error;
+  },
+};
+
+export const dbRefereeSessions = {
+  async create(competitionId: string): Promise<DbRefereeSession> {
+    const { data, error } = await supabase
+      .from("referee_sessions")
+      .insert({
+        competition_id: competitionId,
+        is_active: true,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  },
+
+  async validate(sessionId: string): Promise<DbRefereeSession | null> {
+    const { data, error } = await supabase
+      .from("referee_sessions")
+      .select("*")
+      .eq("id", sessionId)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return null;
+    const now = new Date();
+    const expiresAt = new Date(data.expires_at);
+    if (now > expiresAt || !data.is_active) return null;
+    return data;
+  },
+
+  async getActiveForCompetition(competitionId: string): Promise<DbRefereeSession[]> {
+    const { data, error } = await supabase
+      .from("referee_sessions")
+      .select("*")
+      .eq("competition_id", competitionId)
+      .eq("is_active", true)
+      .gt("expires_at", new Date().toISOString())
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+    return data ?? [];
+  },
+
+  async invalidateAll(competitionId: string): Promise<void> {
+    const { error } = await supabase
+      .from("referee_sessions")
+      .update({ is_active: false })
+      .eq("competition_id", competitionId)
+      .eq("is_active", true);
+    if (error) throw error;
+  },
+
+  async invalidateSession(sessionId: string): Promise<void> {
+    const { error } = await supabase
+      .from("referee_sessions")
+      .update({ is_active: false })
+      .eq("id", sessionId);
+    if (error) throw error;
+  },
+};
+
+export const dbSignalHistory = {
+  async create(
+    sessionId: string,
+    competitionId: string,
+    position: number,
+    signal: "GOOD" | "NO",
+    deviceId: string
+  ): Promise<DbSignalHistory> {
+    const { data, error } = await supabase
+      .from("signal_history")
+      .insert({
+        session_id: sessionId,
+        competition_id: competitionId,
+        position,
+        signal,
+        device_id: deviceId,
+        submitted_at: new Date().toISOString(),
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  },
+
+  async markDelivered(historyId: string): Promise<void> {
+    const { error } = await supabase
+      .from("signal_history")
+      .update({ delivered_at: new Date().toISOString() })
+      .eq("id", historyId);
+    if (error) throw error;
+  },
+
+  async listForCompetition(competitionId: string): Promise<DbSignalHistory[]> {
+    const { data, error } = await supabase
+      .from("signal_history")
+      .select("*")
+      .eq("competition_id", competitionId)
+      .order("submitted_at", { ascending: false });
+    if (error) throw error;
+    return data ?? [];
+  },
+
+  async listRecentDeliveries(competitionId: string, limit: number = 10): Promise<DbSignalHistory[]> {
+    const { data, error } = await supabase
+      .from("signal_history")
+      .select("*")
+      .eq("competition_id", competitionId)
+      .not("delivered_at", "is", null)
+      .order("delivered_at", { ascending: false })
+      .limit(limit);
+    if (error) throw error;
+    return data ?? [];
   },
 };

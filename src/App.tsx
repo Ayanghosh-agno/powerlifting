@@ -31,6 +31,9 @@ import {
   type PersistedState,
 } from "./lib/types";
 import { initializeStateManager } from "./lib/stateManager";
+import { useRefereSessionValidation } from "./hooks/useRefereSessionValidation";
+import { InvalidSessionError } from "./components/InvalidSessionError";
+import { dbRefereeSessions } from "./lib/db";
 
 type AppContextValue = {
   competitions: CompetitionRecord[];
@@ -4371,13 +4374,49 @@ const RefereePage = () => {
   return (
     <section>
       <SectionHeader title="Referee Signals" path="/signals" />
-      <div className="mb-3 inline-flex items-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-sm font-semibold text-emerald-200">
-        Referees Connected: {connectedCount} / 3
+      <div className="mb-4 space-y-4">
+        <div className="mb-3 inline-flex items-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-sm font-semibold text-emerald-200">
+          Referees Connected: {connectedCount} / 3
+        </div>
+        <p className="text-sm text-slate-300">
+          Tap a referee card for a phone QR code, or use <span className="text-cyan-300">Open in new window</span> from the dialog.
+        </p>
       </div>
-      <p className="mb-4 text-sm text-slate-300">
-        Tap a referee card for a phone QR code, or use <span className="text-cyan-300">Open in new window</span> from the
-        dialog.
-      </p>
+
+      <div className="mb-6 rounded-2xl border border-white/15 bg-white/5 p-6">
+        <h3 className="mb-4 font-semibold text-white">Session Management</h3>
+        <div className="space-y-3">
+          <button
+            onClick={async () => {
+              try {
+                const session = await dbRefereeSessions.create(activeCompetitionId || "");
+                const link = `${window.location.origin}/#/signals/left?session=${session.id}&cid=${encodeURIComponent(activeCompetitionId || "")}`;
+                console.log("New session created:", session.id);
+                await navigator.clipboard.writeText(link);
+              } catch (error) {
+                console.error("Failed to create session:", error);
+              }
+            }}
+            className="w-full rounded-xl bg-cyan-500 px-4 py-2 font-semibold text-black hover:bg-cyan-400 transition"
+          >
+            Create New Session
+          </button>
+          <button
+            onClick={async () => {
+              try {
+                await dbRefereeSessions.invalidateAll(activeCompetitionId || "");
+                resetSignals();
+              } catch (error) {
+                console.error("Failed to refresh session:", error);
+              }
+            }}
+            className="w-full rounded-xl border border-white/20 bg-white/5 px-4 py-2 font-semibold text-white hover:bg-white/10 transition"
+          >
+            Refresh Session (Invalidate All)
+          </button>
+        </div>
+      </div>
+
       <div className="flex gap-4 overflow-x-auto pb-2">
         {REFEREE_SLOT_CONFIG.map((slot) => {
           const signal = refereeSignals[slot.index];
@@ -4466,6 +4505,7 @@ const RefereePage = () => {
 const RefereeStationPage = () => {
   const { station } = useParams();
   const [searchParams] = useSearchParams();
+  const { sessionId, isValid, isLoading, error } = useRefereSessionValidation();
   const config = getRefereeConfig(station);
   const {
     competitions,
@@ -4573,6 +4613,14 @@ const RefereeStationPage = () => {
     }
     return undefined;
   }, [refereeSignals, applyRefereeDecision]);
+
+  if (isLoading) {
+    return <InvalidSessionError error="Validating session..." isLoading={true} />;
+  }
+
+  if (!isValid || error) {
+    return <InvalidSessionError error={error || "Invalid or expired session."} />;
+  }
 
   if (!config) {
     return (
@@ -5452,23 +5500,30 @@ const DisplayFullPage = () => {
         if (overlayPhaseTimeoutRef.current) window.clearTimeout(overlayPhaseTimeoutRef.current);
         if (overlayHideTimeoutRef.current) window.clearTimeout(overlayHideTimeoutRef.current);
 
+        const completeAnimation = async () => {
+          setOverlayPhase(null);
+          setShowSignalOverlay(false);
+          setDisplaySignals([null, null, null]);
+
+          try {
+            await clearSignals();
+          } catch (error) {
+            console.error("Failed to clear signals:", error);
+          }
+
+          setRefereeSignals([null, null, null]);
+        };
+
         if (allGood) {
           setOverlayPhase("circles");
           overlayPhaseTimeoutRef.current = window.setTimeout(() => setOverlayPhase("lift"), 2000);
           overlayHideTimeoutRef.current = window.setTimeout(() => {
-            setOverlayPhase(null);
-            setDisplaySignals([null, null, null]);
-            setRefereeSignals([null, null, null]);
-            clearSignals().catch(console.error);
+            completeAnimation().catch(console.error);
           }, RESULT_OVERLAY_DISPLAY_MS);
         } else {
           setOverlayPhase("no-lift");
           overlayHideTimeoutRef.current = window.setTimeout(() => {
-            setOverlayPhase(null);
-            setShowSignalOverlay(false);
-            setDisplaySignals([null, null, null]);
-            setRefereeSignals([null, null, null]);
-            clearSignals().catch(console.error);
+            completeAnimation().catch(console.error);
           }, RESULT_OVERLAY_DISPLAY_MS);
         }
       }

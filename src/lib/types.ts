@@ -68,3 +68,43 @@ export type PersistedState = {
   activeCompetitionGroupName: string | null;
   nextAttemptQueue: NextAttemptEntry[];
 };
+
+export type DbRefereeSession = {
+  id: string;
+  competition_id: string;
+  created_at: string;
+  expires_at: string;
+  is_active: boolean;
+  created_by: string;
+};
+
+export type DbSignalHistory = {
+  id: string;
+  session_id: string;
+  competition_id: string;
+  position: number;
+  signal: "GOOD" | "NO";
+  device_id: string;
+  submitted_at: string;
+  delivered_at: string | null;
+  created_at: string;
+};
+
+export type RefereSessionData = {
+  sessionId: string;
+  competitionId: string;
+  createdAt: Date;
+  expiresAt: Date;
+  isValid: boolean;
+};
+
+export type SignalState = "IDLE" | "CONNECTED" | "SUBMITTED" | "DELIVERED" | "ARCHIVED";
+
+export type RefereSignalState = {
+  position: number;
+  signal: RefSignal;
+  state: SignalState;
+  connectedAt?: Date;
+  submittedAt?: Date;
+  deliveredAt?: Date;
+};
