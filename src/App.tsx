@@ -861,7 +861,6 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     if (data.lifters) setLiftersState(data.lifters.map((l) => normalizeLifter(l)));
     if (data.groups) setGroupsState(data.groups.map((g) => normalizeGroup(g)));
     if (typeof data.currentLifterId !== "undefined") setCurrentLifterIdState(data.currentLifterId);
-    if (data.refereeSignals) setRefereeSignalsState(data.refereeSignals);
     if (typeof data.refereeInputLocked === "boolean") setRefereeInputLockedState(data.refereeInputLocked);
     if (data.currentLift) setCurrentLiftState(data.currentLift);
     if (typeof data.currentAttemptIndex === "number") setCurrentAttemptIndexState(data.currentAttemptIndex);
@@ -1004,7 +1003,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
               lifters,
               groups,
               currentLifterId,
-              refereeSignals,
+              refereeSignals: [null, null, null],
               refereeInputLocked,
               currentLift,
               currentAttemptIndex,
@@ -1024,7 +1023,6 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     lifters,
     groups,
     currentLifterId,
-    refereeSignals,
     refereeInputLocked,
     currentLift,
     currentAttemptIndex,
