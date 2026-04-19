@@ -87,7 +87,7 @@ type AppContextValue = {
   clearTimerState: () => void;
   nextAttemptQueue: NextAttemptEntry[];
   submitNextAttempt: (weight: number) => { ok: boolean; message: string };
-  clearSignals: () => Promise<void>;
+  clearSignals?: () => Promise<void>;
   updateAttemptForLifter: (
     lifterId: string,
     lift: LiftType,
@@ -1305,7 +1305,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
 
   const resetSignals = useCallback(() => {
     setRefereeSignals([null, null, null]);
-    clearSignals();
+    if (clearSignals) clearSignals();
   }, [clearSignals]);
 
   const submitNextAttempt = (weight: number) => {
@@ -5496,7 +5496,7 @@ const DisplayFullPage = () => {
           overlayHideTimeoutRef.current = window.setTimeout(() => {
             setOverlayPhase(null);
             setDisplaySignals([null, null, null]);
-            clearSignals();
+            if (clearSignals) clearSignals();
           }, RESULT_OVERLAY_DISPLAY_MS);
         } else {
           setOverlayPhase("no-lift");
@@ -5504,7 +5504,7 @@ const DisplayFullPage = () => {
             setOverlayPhase(null);
             setShowSignalOverlay(false);
             setDisplaySignals([null, null, null]);
-            clearSignals();
+            if (clearSignals) clearSignals();
           }, RESULT_OVERLAY_DISPLAY_MS);
         }
       }
