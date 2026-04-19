@@ -250,6 +250,11 @@ export const dbRefereeDevices = {
 
 export const dbRefereeSessions = {
   async create(competitionId: string): Promise<DbRefereeSession> {
+    await supabase
+      .from("referee_sessions")
+      .delete()
+      .eq("competition_id", competitionId);
+
     const { data, error } = await supabase
       .from("referee_sessions")
       .insert({
@@ -276,24 +281,24 @@ export const dbRefereeSessions = {
     return data;
   },
 
-  async getActiveForCompetition(competitionId: string): Promise<DbRefereeSession[]> {
+  async getActiveForCompetition(competitionId: string): Promise<DbRefereeSession | null> {
     const { data, error } = await supabase
       .from("referee_sessions")
       .select("*")
       .eq("competition_id", competitionId)
       .eq("is_active", true)
       .gt("expires_at", new Date().toISOString())
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .maybeSingle();
     if (error) throw error;
-    return data ?? [];
+    return data ?? null;
   },
 
-  async invalidateAll(competitionId: string): Promise<void> {
+  async deleteAll(competitionId: string): Promise<void> {
     const { error } = await supabase
       .from("referee_sessions")
-      .update({ is_active: false })
-      .eq("competition_id", competitionId)
-      .eq("is_active", true);
+      .delete()
+      .eq("competition_id", competitionId);
     if (error) throw error;
   },
 

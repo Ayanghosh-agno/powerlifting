@@ -4298,6 +4298,29 @@ const RefereePage = () => {
   const [qrModal, setQrModal] = useState<{ slot: RefereeSlot; title: string; url: string } | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
   const [sessionAction, setSessionAction] = useState<{ type: 'pending' | 'success'; action: 'create' | 'refresh' } | null>(null);
+  const [activeSession, setActiveSession] = useState<{ id: string; expires_at: string } | null>(null);
+  const [loadingSession, setLoadingSession] = useState(true);
+
+  useEffect(() => {
+    if (!activeCompetitionId) {
+      setLoadingSession(false);
+      return;
+    }
+
+    const loadActiveSession = async () => {
+      try {
+        const session = await dbRefereeSessions.getActiveForCompetition(activeCompetitionId);
+        setActiveSession(session);
+      } catch (error) {
+        console.error("Failed to load active session:", error);
+        setActiveSession(null);
+      } finally {
+        setLoadingSession(false);
+      }
+    };
+
+    loadActiveSession();
+  }, [activeCompetitionId]);
 
   useEffect(() => {
     if (!qrModal) return;
@@ -4469,6 +4492,27 @@ const RefereePage = () => {
           </div>
         </div>
 
+        {!loadingSession && activeSession && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-6 rounded-xl px-4 py-3 bg-blue-500/15 border border-blue-400/30 backdrop-blur-sm"
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs uppercase tracking-wider text-blue-300 font-semibold">Active Session</p>
+                <p className="mt-1 text-sm font-mono text-blue-200 break-all">{activeSession.id}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-xs text-blue-400">Expires at</p>
+                <p className="text-sm font-semibold text-blue-200">
+                  {new Date(activeSession.expires_at).toLocaleTimeString()}
+                </p>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
         {sessionAction && (
           <motion.div
             initial={{ opacity: 0, y: -10 }}
@@ -4516,6 +4560,7 @@ const RefereePage = () => {
               setSessionAction({ type: 'pending', action: 'create' });
               try {
                 const session = await dbRefereeSessions.create(activeCompetitionId || "");
+                setActiveSession(session);
                 const link = `${window.location.origin}/#/signals/left?session=${session.id}&cid=${encodeURIComponent(activeCompetitionId || "")}`;
                 console.log("New session created:", session.id);
                 await navigator.clipboard.writeText(link);
@@ -4561,12 +4606,13 @@ const RefereePage = () => {
               if (sessionAction?.type === 'pending') return;
               setSessionAction({ type: 'pending', action: 'refresh' });
               try {
-                await dbRefereeSessions.invalidateAll(activeCompetitionId || "");
+                await dbRefereeSessions.deleteAll(activeCompetitionId || "");
+                setActiveSession(null);
                 resetSignals();
                 setSessionAction({ type: 'success', action: 'refresh' });
                 setTimeout(() => setSessionAction(null), 2500);
               } catch (error) {
-                console.error("Failed to refresh session:", error);
+                console.error("Failed to delete sessions:", error);
                 setSessionAction(null);
               }
             }}
