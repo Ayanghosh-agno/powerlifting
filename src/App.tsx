@@ -4373,54 +4373,144 @@ const RefereePage = () => {
   };
 
   return (
-    <section>
+    <section className="space-y-8">
       <SectionHeader title="Referee Signals" path="/signals" />
-      <div className="mb-4 space-y-4">
-        <div className="mb-3 inline-flex items-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-sm font-semibold text-emerald-200">
-          Referees Connected: {connectedCount} / 3
-        </div>
-        <p className="text-sm text-slate-300">
-          Tap a referee card for a phone QR code, or use <span className="text-cyan-300">Open in new window</span> from the dialog.
-        </p>
-      </div>
 
-      <div className="mb-6 rounded-2xl border border-white/15 bg-white/5 p-6">
-        <h3 className="mb-4 font-semibold text-white">Session Management</h3>
+      <motion.div
+        className="grid grid-cols-1 gap-6 lg:grid-cols-3"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+      >
+        {REFEREE_SLOT_CONFIG.map((slot, idx) => {
+          const signal = refereeSignals[slot.index];
+          const isConnected = connectedRefereeSlots[slot.key];
+          const signalColor = signal === "GOOD" ? "emerald" : signal === "NO" ? "red" : "slate";
+
+          return (
+            <motion.button
+              key={slot.key}
+              type="button"
+              onClick={() => openQrForSlot(slot.key, slot.label)}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: idx * 0.1, duration: 0.4 }}
+              whileHover={{ y: -4, transition: { duration: 0.2 } }}
+              className={`group relative overflow-hidden rounded-2xl border backdrop-blur-sm transition-all duration-300 ${
+                isConnected
+                  ? `border-emerald-400/40 bg-gradient-to-br from-emerald-500/15 to-emerald-600/5 hover:border-emerald-300/60 hover:from-emerald-500/25 hover:to-emerald-600/15`
+                  : `border-slate-600/40 bg-gradient-to-br from-slate-700/10 to-slate-800/10 hover:border-slate-500/60 hover:from-slate-700/20 hover:to-slate-800/20`
+              }`}
+            >
+              <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+
+              <div className="relative p-8 space-y-6">
+                <div>
+                  <p className="text-4xl font-bold bg-gradient-to-r from-white to-slate-200 bg-clip-text text-transparent">
+                    {slot.label}
+                  </p>
+                  <p className="mt-2 text-xs uppercase tracking-[0.15em] text-slate-400 font-medium">Referee Station</p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <motion.div
+                    animate={{ scale: isConnected ? [1, 1.2, 1] : 1 }}
+                    transition={{ repeat: isConnected ? Infinity : 0, duration: 2 }}
+                    className={`h-2.5 w-2.5 rounded-full ${
+                      isConnected ? "bg-emerald-400 shadow-lg shadow-emerald-400/50" : "bg-slate-500"
+                    }`}
+                  />
+                  <span className={`text-xs font-semibold ${
+                    isConnected ? "text-emerald-300" : "text-slate-400"
+                  }`}>
+                    {isConnected ? "Connected" : "Offline"}
+                  </span>
+                </div>
+
+                <div className="h-24 w-full rounded-2xl border border-white/10 overflow-hidden flex items-center justify-center bg-gradient-to-br from-white/5 to-transparent">
+                  <motion.div
+                    animate={{
+                      scale: signal !== null ? [1, 1.05, 1] : 1,
+                      opacity: signal !== null ? 1 : 0.5
+                    }}
+                    transition={{ repeat: signal !== null ? Infinity : 0, duration: 2 }}
+                    className={`text-5xl font-bold transition-all duration-300 ${
+                      signal === "GOOD" ? "text-emerald-400" : signal === "NO" ? "text-red-400" : "text-slate-400"
+                    }`}
+                  >
+                    {signal === "GOOD" ? "✓" : signal === "NO" ? "✕" : "–"}
+                  </motion.div>
+                </div>
+
+                <div className="pt-2 border-t border-white/5">
+                  <p className="text-sm font-semibold text-slate-200">{signal ?? "Awaiting Signal"}</p>
+                  <p className="text-xs text-slate-500 mt-1">Tap to share QR code</p>
+                </div>
+              </div>
+            </motion.button>
+          );
+        })}
+      </motion.div>
+
+      <motion.div
+        className="rounded-3xl border border-slate-600/30 bg-gradient-to-br from-slate-900/50 to-slate-800/30 backdrop-blur-xl p-8"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.3, duration: 0.5 }}
+      >
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h2 className="text-2xl font-bold text-white mb-1">Session Management</h2>
+            <p className="text-sm text-slate-400">Manage referee connections and sessions</p>
+          </div>
+          <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-500/15 border border-emerald-400/30">
+            <div className="h-2 w-2 rounded-full bg-emerald-400" />
+            <span className="text-sm font-semibold text-emerald-300">{connectedCount} / 3 Connected</span>
+          </div>
+        </div>
+
         {sessionAction && (
           <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
-            className={`mb-3 flex items-center gap-2 rounded-lg p-3 ${
+            className={`mb-6 flex items-center gap-3 rounded-xl px-4 py-3 backdrop-blur-sm border ${
               sessionAction.type === 'pending'
-                ? 'bg-blue-500/20 text-blue-300 border border-blue-400/30'
-                : 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/30'
+                ? 'bg-blue-500/15 text-blue-300 border-blue-400/30'
+                : 'bg-emerald-500/15 text-emerald-300 border-emerald-400/30'
             }`}
           >
             {sessionAction.type === 'pending' ? (
               <>
-                <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                <motion.svg
+                  animate={{ rotate: 360 }}
+                  transition={{ repeat: Infinity, duration: 1 }}
+                  className="h-4 w-4 flex-shrink-0"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
-                <span className="text-sm font-medium">
-                  {sessionAction.action === 'create' ? 'Creating session...' : 'Refreshing sessions...'}
+                </motion.svg>
+                <span className="text-sm font-medium flex-1">
+                  {sessionAction.action === 'create' ? 'Creating new session...' : 'Invalidating all sessions...'}
                 </span>
               </>
             ) : (
               <>
-                <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
+                <svg className="h-4 w-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                 </svg>
-                <span className="text-sm font-medium">
-                  {sessionAction.action === 'create' ? 'Session created!' : 'Sessions cleared!'}
+                <span className="text-sm font-medium flex-1">
+                  {sessionAction.action === 'create' ? 'Session created & copied!' : 'All sessions cleared!'}
                 </span>
               </>
             )}
           </motion.div>
         )}
-        <div className="space-y-3">
-          <button
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <motion.button
             onClick={async () => {
               if (sessionAction?.type === 'pending') return;
               setSessionAction({ type: 'pending', action: 'create' });
@@ -4437,21 +4527,36 @@ const RefereePage = () => {
               }
             }}
             disabled={sessionAction?.type === 'pending'}
-            className="w-full rounded-xl bg-cyan-500 px-4 py-2 font-semibold text-black hover:bg-cyan-400 disabled:opacity-70 disabled:cursor-not-allowed transition flex items-center justify-center gap-2"
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            className="relative group rounded-xl bg-gradient-to-r from-cyan-500 to-cyan-600 px-6 py-3 font-semibold text-black hover:from-cyan-400 hover:to-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex items-center justify-center gap-2 overflow-hidden"
           >
+            <div className="absolute inset-0 bg-white/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
             {sessionAction?.type === 'pending' && sessionAction.action === 'create' ? (
               <>
-                <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                <motion.svg
+                  animate={{ rotate: 360 }}
+                  transition={{ repeat: Infinity, duration: 1 }}
+                  className="relative h-4 w-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
-                Creating...
+                </motion.svg>
+                Creating session...
               </>
             ) : (
-              'Create New Session'
+              <>
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                Create New Session
+              </>
             )}
-          </button>
-          <button
+          </motion.button>
+
+          <motion.button
             onClick={async () => {
               if (sessionAction?.type === 'pending') return;
               setSessionAction({ type: 'pending', action: 'refresh' });
@@ -4466,103 +4571,115 @@ const RefereePage = () => {
               }
             }}
             disabled={sessionAction?.type === 'pending'}
-            className="w-full rounded-xl border border-white/20 bg-white/5 px-4 py-2 font-semibold text-white hover:bg-white/10 disabled:opacity-70 disabled:cursor-not-allowed transition flex items-center justify-center gap-2"
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            className="relative group rounded-xl border border-white/20 bg-white/5 hover:bg-white/10 backdrop-blur-sm px-6 py-3 font-semibold text-white disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex items-center justify-center gap-2 overflow-hidden"
           >
+            <div className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
             {sessionAction?.type === 'pending' && sessionAction.action === 'refresh' ? (
               <>
-                <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                <motion.svg
+                  animate={{ rotate: 360 }}
+                  transition={{ repeat: Infinity, duration: 1 }}
+                  className="relative h-4 w-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
-                Refreshing...
+                </motion.svg>
+                Invalidating...
               </>
             ) : (
-              'Refresh Session (Invalidate All)'
+              <>
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Invalidate All
+              </>
             )}
-          </button>
+          </motion.button>
         </div>
-      </div>
+      </motion.div>
 
-      <div className="flex gap-4 overflow-x-auto pb-2">
-        {REFEREE_SLOT_CONFIG.map((slot) => {
-          const signal = refereeSignals[slot.index];
-          const isConnected = connectedRefereeSlots[slot.key];
-          return (
-            <button
-              key={slot.key}
-              type="button"
-              onClick={() => openQrForSlot(slot.key, slot.label)}
-              className={`min-w-[210px] flex-1 rounded-2xl border p-6 text-center transition hover:border-cyan-300/60 hover:bg-cyan-500/10 ${
-                isConnected ? "border-emerald-400/40 bg-emerald-500/10" : "border-white/15 bg-white/5"
-              }`}
-            >
-              <p className="text-2xl font-semibold text-white">{slot.label}</p>
-              <p className="mt-1 text-xs uppercase tracking-[0.2em] text-slate-300">Referee · tap for QR</p>
-              <div className={`mt-2 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${isConnected ? "bg-emerald-500/20 text-emerald-300" : "bg-slate-700/50 text-slate-400"}`}>
-                <span className={`h-1.5 w-1.5 rounded-full ${isConnected ? "bg-emerald-400 animate-pulse" : "bg-slate-500"}`} />
-                {isConnected ? "Connected" : "Offline"}
-              </div>
-              <div
-                className={`mx-auto mt-5 h-16 w-16 rounded-xl border border-white/20 ${
-                  signal === null ? "bg-slate-700" : signal === "GOOD" ? "bg-emerald-500" : "bg-red-500"
-                }`}
-              />
-              <p className="mt-3 text-sm font-semibold text-slate-100">{signal ?? "PENDING"}</p>
-            </button>
-          );
-        })}
-      </div>
-      <button onClick={resetSignals} className="mt-5 rounded-xl bg-white/10 px-4 py-2 text-sm">
+      <motion.button
+        onClick={resetSignals}
+        whileHover={{ scale: 1.02 }}
+        whileTap={{ scale: 0.98 }}
+        className="w-full rounded-xl border border-slate-600/30 bg-slate-900/50 hover:bg-slate-900/80 backdrop-blur-sm px-6 py-4 font-semibold text-white transition-all duration-200 flex items-center justify-center gap-2"
+      >
+        <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+        </svg>
         Reset All Signals
-      </button>
+      </motion.button>
 
       {qrModal ? (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
           role="dialog"
           aria-modal="true"
           aria-labelledby="referee-qr-title"
           onClick={() => setQrModal(null)}
         >
-          <div
-            className="w-full max-w-md rounded-2xl border border-white/15 bg-[#0b1222] p-6 shadow-2xl"
+          <motion.div
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.95, opacity: 0 }}
+            className="w-full max-w-md rounded-3xl border border-slate-600/30 bg-gradient-to-br from-slate-900/90 to-slate-800/90 backdrop-blur-xl p-8 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 id="referee-qr-title" className="text-center text-lg font-semibold text-white">
-              {qrModal.title} referee
-            </h2>
-            <p className="mt-1 text-center text-sm text-slate-400">Scan with a phone camera to open this station.</p>
-            <div className="mt-4 flex justify-center rounded-xl bg-white p-4">
-              <QRCodeSVG value={qrModal.url} size={220} level="M" includeMargin />
+            <div className="text-center mb-6">
+              <h2 id="referee-qr-title" className="text-2xl font-bold text-white">
+                {qrModal.title} Referee
+              </h2>
+              <p className="mt-2 text-sm text-slate-400">Scan with a phone to connect this station</p>
             </div>
-            <p className="mt-3 max-h-24 overflow-y-auto break-all text-center text-[10px] leading-relaxed text-slate-500">
-              {qrModal.url}
-            </p>
-            <div className="mt-5 flex flex-col gap-2">
-              <button
+
+            <motion.div
+              initial={{ scale: 0.9 }}
+              animate={{ scale: 1 }}
+              className="flex justify-center rounded-2xl bg-white p-6 mb-6"
+            >
+              <QRCodeSVG value={qrModal.url} size={240} level="M" includeMargin />
+            </motion.div>
+
+            <div className="flex flex-col gap-3">
+              <motion.button
                 type="button"
                 onClick={() => openRefereeScreen(qrModal.slot)}
-                className="rounded-xl bg-cyan-500 py-3 text-sm font-semibold text-black"
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                className="rounded-xl bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-400 hover:to-cyan-500 py-3 text-sm font-semibold text-black transition-all duration-200"
               >
-                Open in new window
-              </button>
-              <button
+                Open in New Window
+              </motion.button>
+
+              <motion.button
                 type="button"
                 onClick={() => void copyRefereeLink()}
-                className="rounded-xl border border-white/20 bg-white/5 py-3 text-sm font-semibold text-white"
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                className="rounded-xl border border-white/20 bg-white/5 hover:bg-white/10 py-3 text-sm font-semibold text-white transition-all duration-200"
               >
-                {linkCopied ? "Copied link" : "Copy link"}
-              </button>
-              <button
+                {linkCopied ? "✓ Link Copied" : "Copy Link"}
+              </motion.button>
+
+              <motion.button
                 type="button"
                 onClick={() => setQrModal(null)}
-                className="rounded-xl py-2 text-sm font-medium text-slate-400 hover:text-white"
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                className="rounded-xl py-2 text-sm font-medium text-slate-400 hover:text-white transition-colors duration-200"
               >
                 Close
-              </button>
+              </motion.button>
             </div>
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
       ) : null}
     </section>
   );
