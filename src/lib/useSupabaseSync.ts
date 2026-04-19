@@ -161,7 +161,8 @@ export function useSupabaseSync(
   groups: Group[],
   refereeSignals: RefSignal[],
   callbacks: SyncCallbacks,
-  deviceId: string
+  deviceId: string,
+  readOnly = false
 ) {
   const dbReadyRef = useRef(false);
   const lastSavedCompRef = useRef<string>("");
@@ -231,7 +232,7 @@ export function useSupabaseSync(
   }, []);
 
   useEffect(() => {
-    if (!dbReadyRef.current || !activeCompetitionId) return;
+    if (readOnly || !dbReadyRef.current || !activeCompetitionId) return;
     const comp = competitions.find((c) => c.id === activeCompetitionId);
     if (!comp) return;
 
@@ -247,13 +248,14 @@ export function useSupabaseSync(
       }
     }, 800);
   }, [
+    readOnly,
     activeCompetitionId,
     competitions,
   ]);
 
   useEffect(() => {
-    if (!dbReadyRef.current || !activeCompetitionId) return;
-    const serialized = JSON.stringify(lifters.map((l) => l.id + l.name));
+    if (readOnly || !dbReadyRef.current || !activeCompetitionId) return;
+    const serialized = JSON.stringify(lifters.map((l) => lifterToDb(l, activeCompetitionId)));
     if (serialized === lastSavedLiftersRef.current) return;
     lastSavedLiftersRef.current = serialized;
 
@@ -267,10 +269,10 @@ export function useSupabaseSync(
       } catch {
       }
     }, 800);
-  }, [activeCompetitionId, lifters]);
+  }, [readOnly, activeCompetitionId, lifters]);
 
   useEffect(() => {
-    if (!dbReadyRef.current || !activeCompetitionId) return;
+    if (readOnly || !dbReadyRef.current || !activeCompetitionId) return;
     const serialized = JSON.stringify(groups);
     if (serialized === lastSavedGroupsRef.current) return;
     lastSavedGroupsRef.current = serialized;
@@ -285,21 +287,27 @@ export function useSupabaseSync(
       } catch {
       }
     }, 800);
-  }, [activeCompetitionId, groups]);
+  }, [readOnly, activeCompetitionId, groups]);
 
   useEffect(() => {
     if (!activeCompetitionId) return;
 
-    const refreshSignals = async () => {
+    const signalsSnapshot: RefSignal[] = [null, null, null];
+
+    const applyRow = (row: { position: number; signal: string | null }) => {
+      if (row.position >= 0 && row.position <= 2) {
+        signalsSnapshot[row.position] = (row.signal as RefSignal) ?? null;
+      }
+    };
+
+    const fetchAll = async () => {
       try {
         const rows = await dbRefereeSignals.listForCompetition(activeCompetitionId);
-        const signals: RefSignal[] = [null, null, null];
-        for (const row of rows) {
-          if (row.position >= 0 && row.position <= 2) {
-            signals[row.position] = (row.signal as RefSignal) ?? null;
-          }
-        }
-        onRefereeSignalsChanged(signals);
+        signalsSnapshot[0] = null;
+        signalsSnapshot[1] = null;
+        signalsSnapshot[2] = null;
+        for (const row of rows) applyRow(row);
+        onRefereeSignalsChanged([...signalsSnapshot]);
       } catch {
       }
     };
@@ -309,16 +317,46 @@ export function useSupabaseSync(
       .on(
         "postgres_changes",
         {
-          event: "*",
+          event: "INSERT",
           schema: "public",
           table: "referee_signals",
           filter: `competition_id=eq.${activeCompetitionId}`,
         },
-        refreshSignals
+        (payload) => {
+          applyRow(payload.new as { position: number; signal: string | null });
+          onRefereeSignalsChanged([...signalsSnapshot]);
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "referee_signals",
+          filter: `competition_id=eq.${activeCompetitionId}`,
+        },
+        (payload) => {
+          applyRow(payload.new as { position: number; signal: string | null });
+          onRefereeSignalsChanged([...signalsSnapshot]);
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "DELETE",
+          schema: "public",
+          table: "referee_signals",
+          filter: `competition_id=eq.${activeCompetitionId}`,
+        },
+        (payload) => {
+          const pos = (payload.old as { position?: number }).position;
+          if (pos !== undefined && pos >= 0 && pos <= 2) signalsSnapshot[pos] = null;
+          onRefereeSignalsChanged([...signalsSnapshot]);
+        }
       )
       .subscribe();
 
-    refreshSignals();
+    fetchAll();
 
     return () => {
       supabase.removeChannel(channel);

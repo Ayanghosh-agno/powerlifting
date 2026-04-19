@@ -714,6 +714,7 @@ const useAppContext = () => {
 };
 
 const AppProvider = ({ children }: { children: React.ReactNode }) => {
+  const isDisplayScreen = window.location.hash.startsWith("#/display/");
   const seedAppliedRef = useRef(false);
   const relayClientIdRef = useRef(`relay-${Math.random().toString(36).slice(2, 10)}-${Date.now().toString(36)}`);
   const deviceIdRef = useRef(`device-${Math.random().toString(36).slice(2, 10)}-${Date.now().toString(36)}`);
@@ -787,7 +788,8 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     groups,
     refereeSignals,
     { onCompetitionsLoaded, onRefereeSignalsChanged, onDevicesChanged },
-    deviceIdRef.current
+    deviceIdRef.current,
+    isDisplayScreen
   );
 
   const hydrateCompetition = (competition: CompetitionRecord | null) => {
