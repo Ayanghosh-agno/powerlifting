@@ -36,8 +36,8 @@ type Lifter = {
   manualWeightClass: string;
   isEquipped: boolean;
   disqualified: boolean;
-  category: string; 
-  group: string;
+  category: string;
+  group: string | string[];
   team: string;
   rackHeightSquat: number | "";
   rackHeightBench: number | "";
@@ -226,6 +226,17 @@ const socket = {
 };
 
 const defaultGroups: Group[] = [];
+
+const isInGroup = (lifterGroup: string | string[], compareGroup: string): boolean => {
+  if (Array.isArray(lifterGroup)) {
+    return lifterGroup.includes(compareGroup);
+  }
+  return lifterGroup === compareGroup;
+};
+
+const getGroupArray = (group: string | string[]): string[] => {
+  return Array.isArray(group) ? group : [group];
+};
 
 const REFEREE_SLOT_CONFIG: { key: RefereeSlot; label: string; index: number }[] = [
   { key: "left", label: "Left", index: 0 },
@@ -962,7 +973,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     }
     const pool =
       activeCompetitionGroupName !== null
-        ? lifters.filter((l) => l.group === activeCompetitionGroupName)
+        ? lifters.filter((l) => isInGroup(l.group, activeCompetitionGroupName))
         : lifters;
     if (!pool.length) {
       if (currentLifterId !== null) setCurrentLifterIdState(null);
@@ -1367,14 +1378,14 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
 
     const sessionLifters =
       activeCompetitionGroupName !== null
-        ? updated.filter((l) => l.group === activeCompetitionGroupName)
+        ? updated.filter((l) => isInGroup(l.group, activeCompetitionGroupName))
         : updated;
 
     const queueForSession =
       activeCompetitionGroupName !== null
         ? nextAttemptQueue.filter((e) => {
             const row = updated.find((l) => l.id === e.lifterId);
-            return row ? row.group === activeCompetitionGroupName : false;
+            return row ? isInGroup(row.group, activeCompetitionGroupName) : false;
           })
         : nextAttemptQueue;
 
@@ -1793,7 +1804,7 @@ const ControlPage = () => {
   const sessionLifters = useMemo(
     () =>
       activeCompetitionGroupName !== null
-        ? lifters.filter((l) => l.group === activeCompetitionGroupName)
+        ? lifters.filter((l) => isInGroup(l.group, activeCompetitionGroupName))
         : lifters,
     [lifters, activeCompetitionGroupName],
   );
@@ -1912,7 +1923,7 @@ const ControlPage = () => {
     const targetLift = linkedGroup.currentLift;
     if (targetLift === currentLift) return;
 
-    const groupLifters = lifters.filter((lifter) => lifter.group === linkedGroup.name);
+    const groupLifters = lifters.filter((lifter) => isInGroup(lifter.group, linkedGroup.name));
     let targetAttemptIndex = 0;
     for (let idx = 0; idx < 3; idx += 1) {
       const hasIncompleteInRound = groupLifters.some((lifter) => {
@@ -2174,7 +2185,7 @@ const ControlPage = () => {
     // from this panel so it never stays on a higher weight by mistake.
     const orderPool =
       activeCompetitionGroupName !== null
-        ? merged.filter((l) => l.group === activeCompetitionGroupName)
+        ? merged.filter((l) => isInGroup(l.group, activeCompetitionGroupName))
         : merged;
     const nextActive = orderLiftersByIPF(orderPool, currentLift, currentAttemptIndex).find((row) => {
       const attempt = getAttempts(row, currentLift)[currentAttemptIndex];
@@ -3415,7 +3426,7 @@ const GroupManagementPage = () => {
 
   const visibleLifters = useMemo(() => {
     if (!activeGroupFilter) return lifters;
-    return lifters.filter((l) => l.group === activeGroupFilter);
+    return lifters.filter((l) => isInGroup(l.group, activeGroupFilter));
   }, [lifters, activeGroupFilter]);
 
   useEffect(() => {
@@ -3470,7 +3481,7 @@ const GroupManagementPage = () => {
     const enabledLifts = (Object.entries(compLifts) as [LiftType, boolean][]).filter(([, v]) => v).map(([k]) => k);
     if (enabledLifts.length === 0) { showNotice("Select at least one lift to start.", "error"); return; }
     const firstLift: LiftType = enabledLifts.includes("squat") ? "squat" : enabledLifts.includes("bench") ? "bench" : "deadlift";
-    const groupLifters = lifters.filter((l) => l.group === group.name && !l.disqualified);
+    const groupLifters = lifters.filter((l) => isInGroup(l.group, group.name) && !l.disqualified);
     if (groupLifters.length === 0) { showNotice("No active lifters in this group.", "error"); return; }
     const newMode: CompetitionMode = enabledLifts.length === 1 && enabledLifts[0] === "bench" ? "BENCH_ONLY" : "FULL_GAME";
     setNextAttemptQueue([]);
@@ -3501,7 +3512,11 @@ const GroupManagementPage = () => {
       return;
     }
     setGroups(groups.map((g) => (g.id === editingGroupId ? { ...g, name: nextName } : g)));
-    setLifters(lifters.map((l) => (l.group === currentGroup.name ? { ...l, group: nextName } : l)));
+    setLifters(lifters.map((l) => {
+      const groupArray = getGroupArray(l.group);
+      const updatedGroups = groupArray.map((g) => (g === currentGroup.name ? nextName : g));
+      return updatedGroups.length === 1 ? { ...l, group: updatedGroups[0] } : { ...l, group: updatedGroups };
+    }));
     if (selectedGroupName === currentGroup.name) setSelectedGroupName(nextName);
     setEditingGroupId(null);
     setEditingGroupName("");
@@ -3511,7 +3526,12 @@ const GroupManagementPage = () => {
   const deleteGroup = (group: Group) => {
     const fallbackGroup = groups.find((g) => g.id !== group.id);
     const updatedGroups = groups.filter((g) => g.id !== group.id);
-    const updatedLifters = lifters.map((l) => l.group === group.name ? { ...l, group: fallbackGroup?.name ?? "" } : l);
+    const updatedLifters = lifters.map((l) => {
+      const groupArray = getGroupArray(l.group);
+      const filtered = groupArray.filter((g) => g !== group.name);
+      if (filtered.length === 0) return { ...l, group: fallbackGroup?.name ?? "" };
+      return filtered.length === 1 ? { ...l, group: filtered[0] } : { ...l, group: filtered };
+    });
     setGroups(updatedGroups);
     setLifters(updatedLifters);
     if (selectedGroupName === group.name) setSelectedGroupName(fallbackGroup?.name ?? "");
@@ -3547,6 +3567,16 @@ const GroupManagementPage = () => {
     setCheckedLifterIds([]);
   };
 
+  const categoryToGroupNames = (categoryPart: string): string[] => {
+    const groupsForCategory = groups.filter((g) => {
+      const groupNameUpper = g.name.toUpperCase();
+      const categoryUpper = categoryPart.toUpperCase();
+      return groupNameUpper.includes(categoryUpper.split(" ")[0]) ||
+             groupNameUpper.includes(categoryUpper.replace(/\s+/g, ""));
+    });
+    return groupsForCategory.map((g) => g.id);
+  };
+
   const markCheckedAsDoubleCategory = () => {
     if (checkedLifterIds.length === 0) { showNotice("Select at least one lifter.", "error"); return; }
     const getTargetCategory = (sex: "Male" | "Female") => {
@@ -3559,8 +3589,8 @@ const GroupManagementPage = () => {
       if (!checkedLifterIds.includes(l.id)) return l;
       const newCategory = getTargetCategory(l.sex);
       const categoryParts = newCategory.split(" + ");
-      const firstPart = categoryParts[0];
-      return { ...l, category: newCategory, group: firstPart };
+      const groupIds = categoryParts.flatMap((part) => categoryToGroupNames(part.trim()));
+      return { ...l, category: newCategory, group: groupIds.length > 0 ? groupIds : categoryParts[0] };
     }));
     showNotice(`Dual category applied to ${checkedLifterIds.length} lifter(s).`);
   };
@@ -3611,7 +3641,7 @@ const GroupManagementPage = () => {
           {groups.length > 0 && (
             <div className="mt-4 space-y-1.5">
               {groups.map((g) => {
-                const count = lifters.filter((l) => l.group === g.name).length;
+                const count = lifters.filter((l) => isInGroup(l.group, g.name)).length;
                 return (
                   <div key={g.id} className="flex items-center justify-between rounded-lg bg-white/5 px-3 py-2">
                     <span className="text-sm font-medium text-white">Group {g.name}</span>
@@ -3709,7 +3739,7 @@ const GroupManagementPage = () => {
 
         <div className="space-y-3">
           {filteredGroups.map((group) => {
-            const groupLifterCount = lifters.filter((l) => l.group === group.name).length;
+            const groupLifterCount = lifters.filter((l) => isInGroup(l.group, group.name)).length;
             const isEditingThis = editingGroupId === group.id;
             const isStartingComp = startCompGroupId === group.id;
             const isConfirmingDelete = confirmDeleteGroupId === group.id;
@@ -5261,14 +5291,22 @@ const DisplayFullPage = () => {
 
   const allGroupNames = useMemo(() => {
     const seen = new Set<string>();
-    lifters.forEach((l) => { if (l.group) seen.add(l.group); });
+    lifters.forEach((l) => {
+      if (l.group) {
+        if (Array.isArray(l.group)) {
+          l.group.forEach((g) => seen.add(g));
+        } else {
+          seen.add(l.group);
+        }
+      }
+    });
     return Array.from(seen).sort();
   }, [lifters]);
 
   const rankingByGroup = useMemo(() => {
     return allGroupNames.map((groupName) => {
       const members = ranking.filter((l) => {
-        if (l.group === groupName) return true;
+        if (isInGroup(l.group, groupName)) return true;
         if (isDualCategory(l.category)) {
           const [firstPart, secondPart] = getDualCategoryParts(l.category);
           if (firstPart === groupName || secondPart === groupName) return true;
@@ -5288,7 +5326,7 @@ const DisplayFullPage = () => {
   const displaySessionLifters = useMemo(
     () =>
       activeCompetitionGroupName !== null
-        ? lifters.filter((l) => l.group === activeCompetitionGroupName)
+        ? lifters.filter((l) => isInGroup(l.group, activeCompetitionGroupName))
         : lifters,
     [lifters, activeCompetitionGroupName],
   );
@@ -5433,7 +5471,7 @@ const DisplayFullPage = () => {
                       <p className="text-[10px] font-semibold uppercase tracking-widest text-cyan-200">#{idx + 1}</p>
                       <p className="mt-1 text-[clamp(1rem,2.5vw,2rem)] font-black uppercase leading-tight">{lifter.name || "-"}</p>
                       {lifter.group && !activeCompetitionGroupName && (
-                        <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-widest text-amber-300/80">{lifter.group}</p>
+                        <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-widest text-amber-300/80">{Array.isArray(lifter.group) ? lifter.group.join(" + ") : lifter.group}</p>
                       )}
                       <p className="mt-1 text-[clamp(0.9rem,2vw,1.6rem)] font-bold">
                         {attemptWeight === null ? "-" : `${attemptWeight.toFixed(1)} kg`}
@@ -5454,11 +5492,12 @@ const DisplayFullPage = () => {
                     let lastGroup: string | undefined = undefined;
                     rest.forEach((lifter, idx) => {
                       const attemptWeight = getAttemptValue(lifter, currentLift, currentAttemptIndex);
-                      if (!activeCompetitionGroupName && lifter.group && lifter.group !== lastGroup) {
-                        lastGroup = lifter.group;
+                      const groupDisplay = Array.isArray(lifter.group) ? lifter.group.join(" + ") : lifter.group;
+                      if (!activeCompetitionGroupName && groupDisplay && groupDisplay !== lastGroup) {
+                        lastGroup = groupDisplay;
                         rows.push(
-                          <div key={`group-sep-${lifter.group}-${idx}`} className="px-1 pt-1 pb-0.5">
-                            <span className="text-[10px] font-bold uppercase tracking-widest text-amber-300/80">{lifter.group}</span>
+                          <div key={`group-sep-${groupDisplay}-${idx}`} className="px-1 pt-1 pb-0.5">
+                            <span className="text-[10px] font-bold uppercase tracking-widest text-amber-300/80">{groupDisplay}</span>
                           </div>
                         );
                       }
