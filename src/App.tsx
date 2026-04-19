@@ -4988,9 +4988,35 @@ const ResultsTable = memo(({
 }) => {
   const isDualCategory = (category: string) => category.includes(" + ");
 
+  const getDualCategoryParts = (category: string): [string, string] => {
+    const idx = category.indexOf(" + ");
+    return [category.slice(0, idx).trim(), category.slice(idx + 3).trim()];
+  };
+
   const renderLifterRow = (lifter: RankedLifter, idx: number, groupName?: string) => {
     const isDual = isDualCategory(lifter.category);
     const isGuest = isDual && groupName !== undefined && lifter.group !== groupName;
+
+    let displayCategory = lifter.category || "-";
+    if (isDual && groupName !== undefined && isGuest) {
+      const [firstPart, secondPart] = getDualCategoryParts(lifter.category);
+      const groupNameLower = groupName.toLowerCase();
+
+      const firstKeywords = firstPart.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
+      const secondKeywords = secondPart.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
+
+      const firstMatch = firstKeywords.some((kw) => groupNameLower.includes(kw));
+      const secondMatch = secondKeywords.some((kw) => groupNameLower.includes(kw));
+
+      if (!firstMatch && secondMatch) {
+        displayCategory = secondPart;
+      } else if (firstMatch && secondMatch) {
+        displayCategory = secondPart;
+      } else {
+        displayCategory = firstPart;
+      }
+    }
+
     return (
       <tr
         key={`${lifter.id}-${groupName ?? "ungrouped"}`}
@@ -5003,7 +5029,7 @@ const ResultsTable = memo(({
             <span className="ml-1.5 rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300">DUAL</span>
           )}
         </td>
-        <td className="px-3 py-2 hidden md:table-cell text-slate-400 text-xs">{lifter.category || "-"}</td>
+        <td className="px-3 py-2 hidden md:table-cell text-slate-400 text-xs">{displayCategory}</td>
         <td className="px-3 py-2 hidden md:table-cell text-slate-400">{lifter.team || "-"}</td>
         <AttemptDisplayCell attempt={lifter.squatAttempts[0]} />
         <AttemptDisplayCell attempt={lifter.squatAttempts[1]} />
