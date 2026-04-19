@@ -134,6 +134,7 @@ const SYNC_KEY = "powerliftinglive.sync";
 const STORAGE_KEY = "powerliftinglive.state";
 const ONE_MINUTE_MS = 60_000;
 const REFEREE_CONFIRM_DELAY_MS = 1000;
+const RESULT_OVERLAY_DISPLAY_MS = 4000;
 const BAR_WEIGHT_KG = 20;
 const COLLAR_PER_SIDE_KG = 2.5;
 const COLLAR_PAIR_KG = COLLAR_PER_SIDE_KG * 2;
@@ -5471,11 +5472,11 @@ const DisplayFullPage = () => {
       if (allGood) {
         setOverlayPhase("circles");
         const t1 = window.setTimeout(() => setOverlayPhase("lift"), 2000);
-        const t2 = window.setTimeout(() => { setOverlayPhase(null); }, 3000);
+        const t2 = window.setTimeout(() => { setOverlayPhase(null); }, RESULT_OVERLAY_DISPLAY_MS);
         return () => { window.clearTimeout(t1); window.clearTimeout(t2); };
       } else {
         setShowSignalOverlay(true);
-        const t = window.setTimeout(() => setShowSignalOverlay(false), 3000);
+        const t = window.setTimeout(() => setShowSignalOverlay(false), RESULT_OVERLAY_DISPLAY_MS);
         return () => window.clearTimeout(t);
       }
     }
@@ -5645,18 +5646,34 @@ const DisplayFullPage = () => {
             {hasSignals && (
               <div className="flex flex-none items-center gap-3 md:gap-5">
                 <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Referees</p>
-                {refereeSignals.map((signal, idx) => (
-                  <div
-                    key={idx}
-                    className={`h-10 w-10 rounded-full border-2 transition-all duration-300 md:h-14 md:w-14 ${
-                      signal === null
-                        ? "border-slate-600 bg-slate-800"
-                        : signal === "GOOD"
-                          ? "border-white bg-white shadow-[0_0_18px_rgba(255,255,255,0.8)]"
-                          : "border-red-500 bg-red-600 shadow-[0_0_18px_rgba(239,68,68,0.8)]"
-                    }`}
-                  />
-                ))}
+                {(() => {
+                  const signalsReceived = refereeSignals.filter((s) => s !== null).length;
+                  const allSignalsReceived = signalsReceived === 3;
+
+                  return (
+                    <>
+                      {allSignalsReceived ? (
+                        refereeSignals.map((signal, idx) => (
+                          <div
+                            key={idx}
+                            className={`h-10 w-10 rounded-full border-2 transition-all duration-300 md:h-14 md:w-14 ${
+                              signal === "GOOD"
+                                ? "border-white bg-white shadow-[0_0_18px_rgba(255,255,255,0.8)]"
+                                : "border-red-500 bg-red-600 shadow-[0_0_18px_rgba(239,68,68,0.8)]"
+                            }`}
+                          />
+                        ))
+                      ) : (
+                        <div className="flex items-center gap-2 rounded-lg bg-cyan-500/20 px-3 py-1.5 md:px-4 md:py-2">
+                          <div className="h-2 w-2 rounded-full bg-cyan-400 animate-pulse" />
+                          <p className="text-xs font-semibold text-cyan-300 md:text-sm">
+                            {signalsReceived} of 3 ready
+                          </p>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             )}
           </div>
