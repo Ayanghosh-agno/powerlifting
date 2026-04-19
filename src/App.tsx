@@ -4258,7 +4258,6 @@ const RefereePage = () => {
 };
 
 const RefereeStationPage = () => {
-  const navigate = useNavigate();
   const { station } = useParams();
   const [searchParams] = useSearchParams();
   const config = getRefereeConfig(station);
@@ -4269,8 +4268,6 @@ const RefereeStationPage = () => {
     refereeSignals,
     setRefereeSignals,
     applyRefereeDecision,
-    refereeInputLocked,
-    setRefereeInputLocked,
     publishRefereeSignal,
   } = useAppContext();
   const [decisionEndsAt, setDecisionEndsAt] = useState<number | null>(null);
@@ -4330,46 +4327,6 @@ const RefereeStationPage = () => {
   }, [activeCompetitionId, config]);
 
   useEffect(() => {
-    if (!refereeInputLocked) return;
-
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen().catch(() => null);
-    }
-
-    window.history.pushState(null, "", window.location.href);
-    const trapBack = () => {
-      window.history.pushState(null, "", window.location.href);
-    };
-    const preventUnload = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = "";
-    };
-    const preventContextMenu = (event: MouseEvent) => {
-      event.preventDefault();
-    };
-    const preventShortcuts = (event: KeyboardEvent) => {
-      const lowerKey = event.key.toLowerCase();
-      const blocked =
-        lowerKey === "f5" ||
-        lowerKey === "escape" ||
-        (event.ctrlKey && ["r", "w", "n", "l", "t"].includes(lowerKey));
-      if (blocked) event.preventDefault();
-    };
-
-    window.addEventListener("popstate", trapBack);
-    window.addEventListener("beforeunload", preventUnload);
-    window.addEventListener("contextmenu", preventContextMenu);
-    window.addEventListener("keydown", preventShortcuts);
-
-    return () => {
-      window.removeEventListener("popstate", trapBack);
-      window.removeEventListener("beforeunload", preventUnload);
-      window.removeEventListener("contextmenu", preventContextMenu);
-      window.removeEventListener("keydown", preventShortcuts);
-    };
-  }, [refereeInputLocked]);
-
-  useEffect(() => {
     if (refereeSignals.every((signal) => signal !== null)) {
       const timer = window.setTimeout(() => applyRefereeDecision(), 240);
       return () => window.clearTimeout(timer);
@@ -4379,12 +4336,9 @@ const RefereeStationPage = () => {
 
   if (!config) {
     return (
-      <section>
-        <SectionHeader title="Referee Not Found" path="/signals" />
-        <Link to="/signals" className="rounded-lg bg-cyan-500 px-3 py-2 text-sm font-semibold text-black">
-          Back To Referees
-        </Link>
-      </section>
+      <div className="flex min-h-screen items-center justify-center bg-[#05070f] text-white">
+        <p className="text-slate-400">Invalid referee station.</p>
+      </div>
     );
   }
 
@@ -4424,54 +4378,48 @@ const RefereeStationPage = () => {
   const countdown = decisionEndsAt ? Math.max(0, (decisionEndsAt - now) / 1000) : 0;
   const currentSignal = refereeSignals[config.index];
 
-  return (
-    <section className={refereeInputLocked ? "fixed inset-0 z-50 overflow-y-auto bg-slate-950 p-3" : ""}>
-      {!refereeInputLocked && (
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-          <button onClick={() => navigate("/signals")} className="rounded-lg bg-white/10 px-3 py-2 text-sm">
-            Back
-          </button>
-          <button
-            onClick={() => {
-              if (!document.fullscreenElement) {
-                document.documentElement.requestFullscreen().catch(() => null);
-                return;
-              }
-              document.exitFullscreen().catch(() => null);
-            }}
-            className="rounded-lg bg-cyan-500 px-3 py-2 text-sm font-semibold text-black"
-          >
-            Full Screen
-          </button>
-        </div>
-      )}
-      <SectionHeader title={`${config.label} Referee`} path={`/signals/${config.key}`} />
-      <div className="mb-4 rounded-2xl border border-white/15 bg-white/5 p-4">
-        <div className="mb-3 flex items-center justify-between gap-2">
-          <p className="text-sm text-slate-300">Lock mode keeps this page focused on GOOD / NO only.</p>
-          <button
-            onClick={() => setRefereeInputLocked(!refereeInputLocked)}
-            className={`rounded-lg px-3 py-2 text-sm font-semibold ${
-              refereeInputLocked ? "bg-amber-400 text-black" : "bg-white/10 text-white"
-            }`}
-          >
-            {refereeInputLocked ? "Unlock" : "Lock"}
-          </button>
-        </div>
+  const signalColor =
+    currentSignal === "GOOD"
+      ? "text-emerald-400"
+      : currentSignal === "NO"
+      ? "text-red-400"
+      : "text-slate-400";
 
-        {pendingDecision && (
-          <p className="mb-3 text-center text-xs font-semibold uppercase tracking-[0.2em] text-amber-200">
-            Hold {pendingDecision}... {countdown.toFixed(1)}s
-          </p>
+  return (
+    <div className="flex min-h-screen flex-col bg-[#05070f] text-white select-none">
+      <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
+        <div>
+          <p className="text-xs uppercase tracking-widest text-slate-500">Referee Station</p>
+          <p className="text-lg font-bold text-white">{config.label}</p>
+        </div>
+        <div className="flex items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-300">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+          Connected
+        </div>
+      </div>
+
+      <div className="flex flex-1 flex-col items-center justify-center gap-6 px-6 py-8">
+        {pendingDecision ? (
+          <div className="text-center">
+            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-amber-300">
+              Hold {pendingDecision}…
+            </p>
+            <p className="mt-1 text-3xl font-bold tabular-nums text-amber-200">{countdown.toFixed(1)}s</p>
+          </div>
+        ) : (
+          <div className="text-center">
+            <p className="text-xs uppercase tracking-widest text-slate-500">Current</p>
+            <p className={`mt-1 text-2xl font-bold ${signalColor}`}>{currentSignal ?? "PENDING"}</p>
+          </div>
         )}
 
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid w-full max-w-sm gap-4">
           <button
             onPointerDown={(event) => startDecisionHold("GOOD", event)}
             onPointerUp={cancelPendingDecision}
             onPointerLeave={cancelPendingDecision}
             onPointerCancel={cancelPendingDecision}
-            className="h-20 select-none touch-manipulation rounded-xl bg-emerald-500 text-xl font-bold text-black"
+            className="h-28 touch-manipulation rounded-2xl bg-emerald-500 text-2xl font-extrabold text-black shadow-lg shadow-emerald-500/20 active:scale-95 transition-transform"
           >
             GOOD LIFT
           </button>
@@ -4480,27 +4428,15 @@ const RefereeStationPage = () => {
             onPointerUp={cancelPendingDecision}
             onPointerLeave={cancelPendingDecision}
             onPointerCancel={cancelPendingDecision}
-            className="h-20 select-none touch-manipulation rounded-xl bg-red-500 text-xl font-bold text-white"
+            className="h-28 touch-manipulation rounded-2xl bg-red-500 text-2xl font-extrabold text-white shadow-lg shadow-red-500/20 active:scale-95 transition-transform"
           >
             NO LIFT
           </button>
         </div>
 
-        <p className="mt-4 text-center text-sm text-slate-200">Current status: {currentSignal ?? "PENDING"}</p>
+        <p className="text-center text-xs text-slate-600">Hold button to confirm your decision</p>
       </div>
-
-      {refereeInputLocked && (
-        <p className="text-center text-xs text-amber-200">
-          Locked mode active. Back navigation is blocked while this tab stays open.
-        </p>
-      )}
-
-      {!refereeInputLocked && (
-        <p className="text-xs text-slate-400">
-          Tip: Lock this page while officiating to avoid accidental navigation. GOOD / NO always stays active.
-        </p>
-      )}
-    </section>
+    </div>
   );
 };
 
@@ -5730,6 +5666,7 @@ const DbSetupBanner = () => {
 const AppRoutes = () => (
   <Routes>
     <Route path="/display/full" element={<DisplayFullPage />} />
+    <Route path="/signals/:station" element={<RefereeStationPage />} />
     <Route element={<DashboardLayout />}>
       <Route path="/" element={<CompetitionPage />} />
       <Route path="/competitions" element={<CompetitionPage />} />
@@ -5751,7 +5688,6 @@ const AppRoutes = () => (
         }
       />
       <Route path="/signals" element={<RefereePage />} />
-      <Route path="/signals/:station" element={<RefereeStationPage />} />
       <Route path="/screen" element={<ScreenPage />} />
       <Route
         path="/results"
