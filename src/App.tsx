@@ -3785,27 +3785,27 @@ const GroupManagementPage = () => {
                       ))}
                     </div>
                   </div>
+
+                  <div className="flex gap-2">
+                    <button
+                      onClick={createMultipleGroups}
+                      disabled={selectedWeightClasses.size === 0 || selectedCategories.size === 0}
+                      className="flex-1 rounded-lg bg-cyan-500 px-3 py-1.5 text-xs font-semibold text-black transition-opacity disabled:cursor-not-allowed disabled:opacity-40 hover:bg-cyan-400"
+                    >
+                      Create ({selectedWeightClasses.size * selectedCategories.size})
+                    </button>
+                    <button
+                      onClick={() => {
+                        setSelectedWeightClasses(new Set());
+                        setSelectedCategories(new Set());
+                      }}
+                      className="rounded-lg bg-white/10 px-3 py-1.5 text-xs font-medium text-slate-300 transition-colors hover:bg-white/15"
+                    >
+                      Clear
+                    </button>
+                  </div>
                 </div>
               )}
-
-              <div className="flex gap-2">
-                <button
-                  onClick={createMultipleGroups}
-                  disabled={selectedWeightClasses.size === 0 || selectedCategories.size === 0}
-                  className="flex-1 rounded-lg bg-cyan-500 px-3 py-1.5 text-xs font-semibold text-black transition-opacity disabled:cursor-not-allowed disabled:opacity-40 hover:bg-cyan-400"
-                >
-                  Create ({selectedWeightClasses.size * selectedCategories.size})
-                </button>
-                <button
-                  onClick={() => {
-                    setSelectedWeightClasses(new Set());
-                    setSelectedCategories(new Set());
-                  }}
-                  className="rounded-lg bg-white/10 px-3 py-1.5 text-xs font-medium text-slate-300 transition-colors hover:bg-white/15"
-                >
-                  Clear
-                </button>
-              </div>
             </div>
           )}
 
