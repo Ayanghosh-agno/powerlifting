@@ -1303,10 +1303,10 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     setTimerState("IDLE", null);
   };
 
-  const resetSignals = () => {
+  const resetSignals = useCallback(() => {
     setRefereeSignals([null, null, null]);
     clearSignals();
-  };
+  }, [clearSignals]);
 
   const submitNextAttempt = (weight: number) => {
     if (weight <= 0) return { ok: false, message: "Weight must be greater than 0." };
