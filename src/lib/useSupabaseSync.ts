@@ -21,7 +21,7 @@ type Lifter = {
   isEquipped: boolean;
   disqualified: boolean;
   category: string;
-  group: string;
+  group: string | string[];
   team: string;
   rackHeightSquat: number | "";
   rackHeightBench: number | "";
@@ -60,6 +60,9 @@ export type ConnectedRefereeSlots = {
 };
 
 function lifterToDb(lifter: Lifter, competitionId: string) {
+  const groupArray = Array.isArray(lifter.group) ? lifter.group : (lifter.group ? [lifter.group] : []);
+  const firstGroup = groupArray.length > 0 ? groupArray[0] : "";
+
   return {
     id: lifter.id,
     competition_id: competitionId,
@@ -72,7 +75,8 @@ function lifterToDb(lifter: Lifter, competitionId: string) {
     is_equipped: lifter.isEquipped,
     disqualified: lifter.disqualified,
     category: lifter.category,
-    group_name: lifter.group,
+    group_name: firstGroup,
+    group_names: groupArray,
     team: lifter.team,
     rack_height_squat: lifter.rackHeightSquat === "" ? null : lifter.rackHeightSquat,
     rack_height_bench: lifter.rackHeightBench === "" ? null : lifter.rackHeightBench,
@@ -84,6 +88,14 @@ function lifterToDb(lifter: Lifter, competitionId: string) {
 }
 
 function dbToLifter(row: Record<string, unknown>): Lifter {
+  const groupNames = row.group_names as unknown[];
+  const group: string | string[] =
+    Array.isArray(groupNames) && groupNames.length > 0
+      ? groupNames.length === 1
+        ? (groupNames[0] as string)
+        : (groupNames as string[])
+      : "";
+
   return {
     id: row.id as string,
     name: row.name as string,
@@ -95,7 +107,7 @@ function dbToLifter(row: Record<string, unknown>): Lifter {
     isEquipped: row.is_equipped as boolean,
     disqualified: row.disqualified as boolean,
     category: row.category as string,
-    group: row.group_name as string,
+    group,
     team: row.team as string,
     rackHeightSquat: row.rack_height_squat != null ? Number(row.rack_height_squat) : "",
     rackHeightBench: row.rack_height_bench != null ? Number(row.rack_height_bench) : "",

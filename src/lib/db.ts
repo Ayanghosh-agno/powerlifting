@@ -40,6 +40,7 @@ export type DbLifter = {
   disqualified: boolean;
   category: string;
   group_name: string;
+  group_names: unknown[];
   team: string;
   rack_height_squat: number | null;
   rack_height_bench: number | null;
