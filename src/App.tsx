@@ -3416,6 +3416,7 @@ const GroupManagementPage = () => {
   const [compLifts, setCompLifts] = useState<Record<LiftType, boolean>>({ squat: true, bench: true, deadlift: true });
 
   const [showAddLifterPanel, setShowAddLifterPanel] = useState(false);
+  const [showGroupsList, setShowGroupsList] = useState(false);
   const [selectedLifterId, setSelectedLifterId] = useState(lifters[0]?.id ?? "");
   const [selectedGroupName, setSelectedGroupName] = useState(groups[0]?.name ?? "");
   const [lifterSearchTerm, setLifterSearchTerm] = useState("");
@@ -3810,16 +3811,28 @@ const GroupManagementPage = () => {
           )}
 
           {groups.length > 0 && (
-            <div className="mt-4 space-y-1.5">
-              {groups.map((g) => {
-                const count = lifters.filter((l) => isInGroup(l.group, g.name)).length;
-                return (
-                  <div key={g.id} className="flex items-center justify-between rounded-lg bg-white/5 px-3 py-2">
-                    <span className="text-sm font-medium text-white">{g.name}</span>
-                    <span className="text-xs text-slate-400">{count} lifter{count !== 1 ? "s" : ""}</span>
-                  </div>
-                );
-              })}
+            <div className="mt-4 space-y-2">
+              <button
+                onClick={() => setShowGroupsList(!showGroupsList)}
+                className="w-full rounded-lg border border-white/15 bg-white/5 p-2.5 text-left transition-colors hover:bg-white/10"
+              >
+                <p className="text-xs font-semibold text-slate-300">
+                  {showGroupsList ? "▼ Hide Groups" : "▶ Show Groups"} ({groups.length})
+                </p>
+              </button>
+              {showGroupsList && (
+                <div className="space-y-1.5">
+                  {groups.map((g) => {
+                    const count = lifters.filter((l) => isInGroup(l.group, g.name)).length;
+                    return (
+                      <div key={g.id} className="flex items-center justify-between rounded-lg bg-white/5 px-3 py-2">
+                        <span className="text-sm font-medium text-white">{g.name}</span>
+                        <span className="text-xs text-slate-400">{count} lifter{count !== 1 ? "s" : ""}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
           {groups.length === 0 && suggestedGroupNames.length === 0 && (
