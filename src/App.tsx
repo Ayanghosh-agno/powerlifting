@@ -5045,15 +5045,17 @@ const ResultsTable = memo(({
   return (
     <div className="h-full space-y-3 overflow-y-auto">
       {rankingByGroup.map(({ groupName, members }) => (
-        <div key={groupName} className="overflow-hidden rounded-xl border border-cyan-400/30 bg-black/25">
-          <div className={`flex w-full items-center gap-3 border-b border-white/10 px-4 py-3 ${isDarkTheme ? "bg-cyan-900/20" : "bg-cyan-800/20"}`}>
-            <div className="h-3 w-1 rounded-full bg-cyan-400" />
-            <p className="text-[clamp(0.9rem,2vw,1.2rem)] font-black uppercase tracking-[0.22em] text-cyan-300">
-              {groupName}
-            </p>
-            <span className="ml-1 text-[clamp(0.65rem,1.2vw,0.8rem)] font-normal normal-case tracking-normal text-slate-400">
-              {members.length} lifter{members.length !== 1 ? "s" : ""}
-            </span>
+        <div key={groupName || "default"} className="overflow-hidden rounded-xl border border-cyan-400/40 bg-black/30">
+          <div className="flex w-full items-center gap-3 border-b-2 border-cyan-400/50 bg-gradient-to-r from-cyan-900/30 to-cyan-900/10 px-4 py-4">
+            <div className="h-3.5 w-1.5 rounded-full bg-cyan-400" />
+            <div className="flex-1">
+              <p className="text-[clamp(1rem,2.2vw,1.3rem)] font-black uppercase leading-tight tracking-[0.24em] text-cyan-100">
+                {groupName || "Unassigned"}
+              </p>
+              <p className="mt-0.5 text-[clamp(0.65rem,1.1vw,0.75rem)] font-semibold normal-case tracking-normal text-cyan-300/70">
+                {members.length} lifter{members.length !== 1 ? "s" : ""}
+              </p>
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[820px] text-xs md:text-sm">
@@ -5072,16 +5074,18 @@ const ResultsTable = memo(({
       ))}
 
       {ungroupedRanking.length > 0 && (
-        <div className="overflow-hidden rounded-xl border border-white/10 bg-black/20">
+        <div className="overflow-hidden rounded-xl border border-slate-500/30 bg-black/20">
           {rankingByGroup.length > 0 && (
-            <div className={`flex w-full items-center gap-3 border-b border-white/10 px-4 py-3 ${isDarkTheme ? "bg-white/5" : "bg-black/10"}`}>
-              <div className="h-3 w-1 rounded-full bg-slate-500" />
-              <p className="text-[clamp(0.9rem,2vw,1.2rem)] font-black uppercase tracking-[0.22em] text-slate-400">
-                Other
-              </p>
-              <span className="ml-1 text-[clamp(0.65rem,1.2vw,0.8rem)] font-normal normal-case tracking-normal text-slate-500">
-                {ungroupedRanking.length} lifter{ungroupedRanking.length !== 1 ? "s" : ""}
-              </span>
+            <div className="flex w-full items-center gap-3 border-b-2 border-slate-500/40 bg-gradient-to-r from-slate-900/25 to-slate-900/10 px-4 py-4">
+              <div className="h-3.5 w-1.5 rounded-full bg-slate-400" />
+              <div className="flex-1">
+                <p className="text-[clamp(1rem,2.2vw,1.3rem)] font-black uppercase leading-tight tracking-[0.24em] text-slate-200">
+                  Ungrouped
+                </p>
+                <p className="mt-0.5 text-[clamp(0.65rem,1.1vw,0.75rem)] font-semibold normal-case tracking-normal text-slate-400/70">
+                  {ungroupedRanking.length} lifter{ungroupedRanking.length !== 1 ? "s" : ""}
+                </p>
+              </div>
             </div>
           )}
           <div className="overflow-x-auto">
@@ -5131,6 +5135,7 @@ const DisplayFullPage = () => {
   const [displaySignals, setDisplaySignals] = useState<RefSignal[]>([null, null, null]);
   const [overlayPhase, setOverlayPhase] = useState<"circles" | "lift" | null>(null);
   const [displayTheme, setDisplayTheme] = useState<DisplayThemeKey>("black");
+  const prevSignalsRef = useRef<string>("");
 
   const cycleDisplayTheme = () => {
     setDisplayTheme((prev) => {
@@ -5179,6 +5184,10 @@ const DisplayFullPage = () => {
   }, [currentLifterId, currentLifter, setCurrentLifterId]);
 
   useEffect(() => {
+    const signalsStr = JSON.stringify(refereeSignals);
+    if (signalsStr === prevSignalsRef.current) return;
+    prevSignalsRef.current = signalsStr;
+
     if (refereeSignals.every((signal) => signal !== null)) {
       setDisplaySignals(refereeSignals);
       const allGood = refereeSignals.every((s) => s === "GOOD");
