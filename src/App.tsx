@@ -5493,7 +5493,7 @@ const DisplayFullPage = () => {
             setOverlayPhase(null);
             setDisplaySignals([null, null, null]);
             setRefereeSignals([null, null, null]);
-            clearSignals();
+            clearSignals().catch(console.error);
           }, RESULT_OVERLAY_DISPLAY_MS);
         } else {
           setOverlayPhase("no-lift");
@@ -5502,7 +5502,7 @@ const DisplayFullPage = () => {
             setShowSignalOverlay(false);
             setDisplaySignals([null, null, null]);
             setRefereeSignals([null, null, null]);
-            clearSignals();
+            clearSignals().catch(console.error);
           }, RESULT_OVERLAY_DISPLAY_MS);
         }
       }

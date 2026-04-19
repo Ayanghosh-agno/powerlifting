@@ -430,7 +430,8 @@ export function useSupabaseSync(
     if (!isSupabaseConfigured || !activeCompetitionId) return;
     try {
       await dbRefereeSignals.clearAll(activeCompetitionId);
-    } catch {
+    } catch (error) {
+      console.error("Error clearing signals:", error);
     }
   }, [activeCompetitionId]);
 
