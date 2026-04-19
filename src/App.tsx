@@ -1251,25 +1251,25 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
-  const startAttemptClock = () => {
+  const startAttemptClock = useCallback(() => {
     if (!competitionStarted) setCompetitionStarted(true);
     setTimerState("ATTEMPT", Date.now() + ONE_MINUTE_MS);
-  };
+  }, [competitionStarted, setTimerState]);
 
-  const startNextAttemptClock = () => {
+  const startNextAttemptClock = useCallback(() => {
     setTimerState("NEXT_ATTEMPT", Date.now() + ONE_MINUTE_MS);
-  };
+  }, [setTimerState]);
 
-  const clearTimerState = () => {
+  const clearTimerState = useCallback(() => {
     setTimerState("IDLE", null);
-  };
+  }, [setTimerState]);
 
   const resetSignals = useCallback(() => {
     setRefereeSignals([null, null, null]);
     clearSignals();
   }, [clearSignals, setRefereeSignals]);
 
-  const submitNextAttempt = (weight: number) => {
+  const submitNextAttempt = useCallback((weight: number) => {
     if (weight <= 0) return { ok: false, message: "Weight must be greater than 0." };
     if (Math.round(weight * 10) % 25 !== 0) return { ok: false, message: "Use 2.5kg increments." };
     const idx = lifters.findIndex((l) => l.id === currentLifterId);
@@ -1289,9 +1289,9 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     setLifters(updated);
     if (timerPhase === "NEXT_ATTEMPT") clearTimerState();
     return { ok: true, message: "Attempt submitted." };
-  };
+  }, [lifters, currentLifterId, currentLift, currentAttemptIndex, timerPhase, clearTimerState]);
 
-  const updateAttemptForLifter = (lifterId: string, lift: LiftType, attemptIndex: number, weight: number | "") => {
+  const updateAttemptForLifter = useCallback((lifterId: string, lift: LiftType, attemptIndex: number, weight: number | "") => {
     if (attemptIndex < 0 || attemptIndex > 2) return { ok: false, message: "Invalid attempt index." };
     if (weight !== "") {
       if (weight <= 0) return { ok: false, message: "Weight must be greater than 0." };
@@ -1328,9 +1328,9 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     }
 
     return { ok: true, message: "Attempt updated." };
-  };
+  }, [lifters, nextAttemptQueue, timerPhase, startNextAttemptClock, clearTimerState, setNextAttemptQueue]);
 
-  const applyRefereeDecision = (overrideSignals?: RefSignal[]) => {
+  const applyRefereeDecision = useCallback((overrideSignals?: RefSignal[]) => {
     const idx = lifters.findIndex((l) => l.id === currentLifterId);
     if (idx < 0) return;
     const effectiveSignals = overrideSignals ?? refereeSignals;
@@ -1452,7 +1452,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
       resetSignals();
       overlayHideTimeoutRef.current = null;
     }, RESULT_OVERLAY_DISPLAY_MS + 500);
-  };
+  }, [lifters, currentLifterId, refereeSignals, currentLift, currentAttemptIndex, activeCompetitionGroupName, nextAttemptQueue, competitionMode, setLifters, setCurrentLift, setCurrentAttemptIndex, setCurrentLifterId, setNextAttemptQueueState, broadcast, startNextAttemptClock, clearTimerState, resetSignals]);
 
   return (
     <AppContext.Provider
