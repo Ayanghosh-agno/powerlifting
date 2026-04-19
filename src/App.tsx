@@ -1301,7 +1301,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const resetSignals = useCallback(() => {
-    setRefereeSignals([null, null, null]);
+    setRefereeSignalsState([null, null, null]);
     clearSignals();
   }, [clearSignals]);
 
@@ -4640,7 +4640,7 @@ const RefereeStationPage = () => {
       const nextSignals = refereeSignals.map((signal, idx) => (idx === config.index ? decision : signal));
       publishRefereeSignal(config.index, decision);
       commitTimeoutRef.current = window.setTimeout(() => {
-        setRefereeSignals(nextSignals);
+        setRefereeSignalsState(nextSignals);
         commitTimeoutRef.current = null;
       }, 90);
       holdTimeoutRef.current = null;
@@ -5492,7 +5492,7 @@ const DisplayFullPage = () => {
           overlayHideTimeoutRef.current = window.setTimeout(() => {
             setOverlayPhase(null);
             setDisplaySignals([null, null, null]);
-            setRefereeSignals([null, null, null]);
+            setRefereeSignalsState([null, null, null]);
             clearSignals().catch(console.error);
           }, RESULT_OVERLAY_DISPLAY_MS);
         } else {
@@ -5501,7 +5501,7 @@ const DisplayFullPage = () => {
             setOverlayPhase(null);
             setShowSignalOverlay(false);
             setDisplaySignals([null, null, null]);
-            setRefereeSignals([null, null, null]);
+            setRefereeSignalsState([null, null, null]);
             clearSignals().catch(console.error);
           }, RESULT_OVERLAY_DISPLAY_MS);
         }
