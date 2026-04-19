@@ -407,11 +407,11 @@ export function useSupabaseSync(
       .on("presence", { event: "leave" }, () => {
         if (!cancelled) onDevicesChanged(rebuildSlots(ch.presenceState<{ position: number }>()));
       })
-      .subscribe((status) => {
-        if (!cancelled && status === "SUBSCRIBED") {
-          presenceChannelRef.current = ch;
-        }
-      });
+      .subscribe();
+
+    if (!cancelled) {
+      presenceChannelRef.current = ch;
+    }
 
     return () => {
       cancelled = true;
@@ -469,20 +469,6 @@ export function useSupabaseSync(
     const ch = presenceChannelRef.current;
     if (!ch) return;
     try {
-      const state = ch.state;
-      if (state !== "subscribed") {
-        await new Promise<void>((resolve, reject) => {
-          const timeoutId = setTimeout(() => {
-            reject(new Error("Presence channel subscription timeout"));
-          }, 5000);
-          ch.subscribe((status) => {
-            if (status === "SUBSCRIBED") {
-              clearTimeout(timeoutId);
-              resolve();
-            }
-          });
-        });
-      }
       await ch.track({ position });
     } catch {
     }

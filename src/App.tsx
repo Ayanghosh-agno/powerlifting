@@ -860,6 +860,9 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     if (data.groups) setGroupsState(data.groups.map((g) => normalizeGroup(g)));
     if (typeof data.currentLifterId !== "undefined") setCurrentLifterIdState(data.currentLifterId);
     if (typeof data.refereeInputLocked === "boolean") setRefereeInputLockedState(data.refereeInputLocked);
+    if (Array.isArray((data as { refereeSignals?: unknown }).refereeSignals)) {
+      setRefereeSignalsState((data as { refereeSignals?: RefSignal[] }).refereeSignals ?? [null, null, null]);
+    }
     if (data.currentLift) setCurrentLiftState(data.currentLift);
     if (typeof data.currentAttemptIndex === "number") setCurrentAttemptIndexState(data.currentAttemptIndex);
     if (typeof data.competitionStarted === "boolean") setCompetitionStartedState(data.competitionStarted);
