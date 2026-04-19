@@ -3338,6 +3338,18 @@ const LifterManagementPage = () => {
   );
 };
 
+const LIFT_STAGE_OPTIONS: { value: LiftType; label: string }[] = [
+  { value: "squat", label: "Squat" },
+  { value: "bench", label: "Bench" },
+  { value: "deadlift", label: "Deadlift" },
+];
+
+const LIFT_STAGE_COLORS: Record<LiftType, string> = {
+  squat: "bg-blue-500/20 text-blue-300 border-blue-500/30",
+  bench: "bg-amber-500/20 text-amber-300 border-amber-500/30",
+  deadlift: "bg-rose-500/20 text-rose-300 border-rose-500/30",
+};
+
 const GroupManagementPage = () => {
   const {
     groups,
@@ -3352,12 +3364,17 @@ const GroupManagementPage = () => {
     setActiveCompetitionGroupName,
     setNextAttemptQueue,
   } = useAppContext();
+
   const [groupName, setGroupName] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [activeGroupFilter, setActiveGroupFilter] = useState("");
-  const [groupNotice, setGroupNotice] = useState("");
+  const [groupNotice, setGroupNotice] = useState<{ text: string; type: "info" | "success" | "error" } | null>(null);
+  const noticeTimerRef = useRef<number | null>(null);
+
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [editingGroupName, setEditingGroupName] = useState("");
+  const [confirmDeleteGroupId, setConfirmDeleteGroupId] = useState<string | null>(null);
+
   const [editingLifterId, setEditingLifterId] = useState<string | null>(null);
   const [editingLifterDraft, setEditingLifterDraft] = useState<{
     name: string;
@@ -3367,13 +3384,24 @@ const GroupManagementPage = () => {
     group: string;
     category: string;
   } | null>(null);
-  const [selectedLifterId, setSelectedLifterId] = useState(lifters[0]?.id ?? "");
-  const [selectedGroupName, setSelectedGroupName] = useState(groups[0]?.name ?? "");
+
   const [checkedLifterIds, setCheckedLifterIds] = useState<string[]>([]);
   const [bulkTargetGroupName, setBulkTargetGroupName] = useState(groups[0]?.name ?? "");
   const [doubleCategoryType, setDoubleCategoryType] = useState<"SUBJR_JR" | "JR_SR" | "SR_M1">("JR_SR");
-    const [startCompGroupId, setStartCompGroupId] = useState<string | null>(null);
-    const [compLifts, setCompLifts] = useState<Record<LiftType, boolean>>({ squat: true, bench: true, deadlift: true });
+  const [startCompGroupId, setStartCompGroupId] = useState<string | null>(null);
+  const [compLifts, setCompLifts] = useState<Record<LiftType, boolean>>({ squat: true, bench: true, deadlift: true });
+
+  const [showAddLifterPanel, setShowAddLifterPanel] = useState(false);
+  const [selectedLifterId, setSelectedLifterId] = useState(lifters[0]?.id ?? "");
+  const [selectedGroupName, setSelectedGroupName] = useState(groups[0]?.name ?? "");
+
+  const showNotice = (text: string, type: "info" | "success" | "error" = "success") => {
+    if (noticeTimerRef.current) window.clearTimeout(noticeTimerRef.current);
+    setGroupNotice({ text, type });
+    noticeTimerRef.current = window.setTimeout(() => setGroupNotice(null), 3500);
+  };
+
+  useEffect(() => () => { if (noticeTimerRef.current) window.clearTimeout(noticeTimerRef.current); }, []);
 
   const filteredGroups = useMemo(() => {
     const query = searchTerm.trim().toUpperCase();
@@ -3387,84 +3415,59 @@ const GroupManagementPage = () => {
   }, [lifters, activeGroupFilter]);
 
   useEffect(() => {
-    if (!lifters.length) {
-      setSelectedLifterId("");
-      return;
-    }
+    if (!lifters.length) { setSelectedLifterId(""); return; }
     if (!selectedLifterId || !lifters.some((l) => l.id === selectedLifterId)) {
       setSelectedLifterId(lifters[0].id);
     }
   }, [lifters, selectedLifterId]);
 
   useEffect(() => {
-    if (!groups.length) {
-      setSelectedGroupName("");
-      setBulkTargetGroupName("");
-      return;
-    }
-    if (!selectedGroupName || !groups.some((g) => g.name === selectedGroupName)) {
-      setSelectedGroupName(groups[0].name);
-    }
-    if (!bulkTargetGroupName || !groups.some((g) => g.name === bulkTargetGroupName)) {
-      setBulkTargetGroupName(groups[0].name);
-    }
+    if (!groups.length) { setSelectedGroupName(""); setBulkTargetGroupName(""); return; }
+    if (!selectedGroupName || !groups.some((g) => g.name === selectedGroupName)) setSelectedGroupName(groups[0].name);
+    if (!bulkTargetGroupName || !groups.some((g) => g.name === bulkTargetGroupName)) setBulkTargetGroupName(groups[0].name);
   }, [groups, selectedGroupName, bulkTargetGroupName]);
 
   useEffect(() => {
-    setCheckedLifterIds((prev) => prev.filter((id) => visibleLifters.some((lifter) => lifter.id === id)));
+    setCheckedLifterIds((prev) => prev.filter((id) => visibleLifters.some((l) => l.id === id)));
   }, [visibleLifters]);
 
   useEffect(() => {
     if (!activeGroupFilter) return;
-    if (!groups.some((g) => g.name === activeGroupFilter)) {
-      setActiveGroupFilter("");
-    }
+    if (!groups.some((g) => g.name === activeGroupFilter)) setActiveGroupFilter("");
   }, [groups, activeGroupFilter]);
 
   const createGroup = () => {
     const nextName = groupName.trim().toUpperCase();
     if (!nextName) return;
     if (groups.some((g) => g.name.toUpperCase() === nextName)) {
-      setGroupNotice("Group already exists.");
+      showNotice("A group with this name already exists.", "error");
       return;
     }
     setGroups([...groups, { id: `group-${Date.now()}`, name: nextName, currentLift: "squat" }]);
     setSelectedGroupName(nextName);
     setActiveGroupFilter(nextName);
     setGroupName("");
-    setGroupNotice(`Group ${nextName} created.`);
+    showNotice(`Group "${nextName}" created.`);
   };
 
   const assignLifter = () => {
     if (!selectedLifterId || !selectedGroupName) return;
-    const updated = lifters.map((l) => (l.id === selectedLifterId ? { ...l, group: selectedGroupName } : l));
-    setLifters(updated);
-    setGroupNotice("Lifter moved successfully.");
-  };
-
-  const startEditGroup = (group: Group) => {
-    setEditingGroupId(group.id);
-    setEditingGroupName(group.name);
+    const lifter = lifters.find((l) => l.id === selectedLifterId);
+    setLifters(lifters.map((l) => (l.id === selectedLifterId ? { ...l, group: selectedGroupName } : l)));
+    showNotice(`${lifter?.name ?? "Lifter"} moved to Group ${selectedGroupName}.`);
+    setShowAddLifterPanel(false);
   };
 
   const setGroupLiftStage = (groupId: string, lift: LiftType) => {
-    const updated = groups.map((group) => (group.id === groupId ? { ...group, currentLift: lift } : group));
-    setGroups(updated);
-    setGroupNotice(`Group stage updated to ${lift.toUpperCase()}.`);
+    setGroups(groups.map((g) => (g.id === groupId ? { ...g, currentLift: lift } : g)));
   };
 
   const handleStartGroupCompetition = (group: Group) => {
     const enabledLifts = (Object.entries(compLifts) as [LiftType, boolean][]).filter(([, v]) => v).map(([k]) => k);
-    if (enabledLifts.length === 0) {
-      setGroupNotice("Select at least one lift to start the competition.");
-      return;
-    }
+    if (enabledLifts.length === 0) { showNotice("Select at least one lift to start.", "error"); return; }
     const firstLift: LiftType = enabledLifts.includes("squat") ? "squat" : enabledLifts.includes("bench") ? "bench" : "deadlift";
     const groupLifters = lifters.filter((l) => l.group === group.name && !l.disqualified);
-    if (groupLifters.length === 0) {
-      setGroupNotice("No lifters in this group to start a competition.");
-      return;
-    }
+    if (groupLifters.length === 0) { showNotice("No active lifters in this group.", "error"); return; }
     const newMode: CompetitionMode = enabledLifts.length === 1 && enabledLifts[0] === "bench" ? "BENCH_ONLY" : "FULL_GAME";
     setNextAttemptQueue([]);
     setActiveCompetitionGroupName(group.name);
@@ -3475,542 +3478,550 @@ const GroupManagementPage = () => {
     if (orderedGroupLifters[0]) setCurrentLifterId(orderedGroupLifters[0].id);
     setCompetitionStarted(true);
     setStartCompGroupId(null);
-    setGroupNotice(`Competition started for Group ${group.name} — ${enabledLifts.map((l) => l.toUpperCase()).join(", ")}.`);
+    showNotice(`Competition started for Group ${group.name}.`);
+  };
+
+  const startEditGroup = (group: Group) => {
+    setEditingGroupId(group.id);
+    setEditingGroupName(group.name);
   };
 
   const saveEditGroup = () => {
     if (!editingGroupId) return;
     const nextName = editingGroupName.trim().toUpperCase();
     if (!nextName) return;
-
     const currentGroup = groups.find((g) => g.id === editingGroupId);
     if (!currentGroup) return;
-
-    const duplicate = groups.some((g) => g.id !== editingGroupId && g.name.toUpperCase() === nextName);
-    if (duplicate) {
-      setGroupNotice("Group name already exists.");
+    if (groups.some((g) => g.id !== editingGroupId && g.name.toUpperCase() === nextName)) {
+      showNotice("That group name is already taken.", "error");
       return;
     }
-
-    const updatedGroups = groups.map((g) => (g.id === editingGroupId ? { ...g, name: nextName } : g));
-    const updatedLifters = lifters.map((l) => (l.group === currentGroup.name ? { ...l, group: nextName } : l));
-
-    setGroups(updatedGroups);
-    setLifters(updatedLifters);
+    setGroups(groups.map((g) => (g.id === editingGroupId ? { ...g, name: nextName } : g)));
+    setLifters(lifters.map((l) => (l.group === currentGroup.name ? { ...l, group: nextName } : l)));
     if (selectedGroupName === currentGroup.name) setSelectedGroupName(nextName);
     setEditingGroupId(null);
     setEditingGroupName("");
-    setGroupNotice(`Group renamed to ${nextName}.`);
+    showNotice(`Group renamed to "${nextName}".`);
   };
 
   const deleteGroup = (group: Group) => {
     const fallbackGroup = groups.find((g) => g.id !== group.id);
-    const confirmed = fallbackGroup
-      ? window.confirm(`Delete Group ${group.name}? Lifters will move to Group ${fallbackGroup.name}.`)
-      : window.confirm(`Delete Group ${group.name}? This is the last group and assigned lifters will become ungrouped.`);
-    if (!confirmed) return;
-
     const updatedGroups = groups.filter((g) => g.id !== group.id);
-    const updatedLifters = lifters.map((l) =>
-      l.group === group.name ? { ...l, group: fallbackGroup?.name ?? "" } : l,
-    );
-
+    const updatedLifters = lifters.map((l) => l.group === group.name ? { ...l, group: fallbackGroup?.name ?? "" } : l);
     setGroups(updatedGroups);
     setLifters(updatedLifters);
     if (selectedGroupName === group.name) setSelectedGroupName(fallbackGroup?.name ?? "");
     if (activeGroupFilter === group.name) setActiveGroupFilter(fallbackGroup?.name ?? "");
-    if (editingGroupId === group.id) {
-      setEditingGroupId(null);
-      setEditingGroupName("");
-    }
-    if (updatedGroups.length === 0) {
-      setGroupNotice("All groups deleted. Lifters are now ungrouped.");
-    } else {
-      setGroupNotice(`Group ${group.name} deleted.`);
-    }
+    if (editingGroupId === group.id) { setEditingGroupId(null); setEditingGroupName(""); }
+    setConfirmDeleteGroupId(null);
+    showNotice(`Group "${group.name}" deleted.`);
   };
 
   const startEditLifter = (lifter: Lifter) => {
     setEditingLifterId(lifter.id);
-    setEditingLifterDraft({
-      name: lifter.name,
-      sex: lifter.sex,
-      bodyweight: lifter.bodyweight,
-      team: lifter.team,
-      group: lifter.group,
-      category: lifter.category,
-    });
+    setEditingLifterDraft({ name: lifter.name, sex: lifter.sex, bodyweight: lifter.bodyweight, team: lifter.team, group: lifter.group, category: lifter.category });
   };
 
-  const cancelEditLifter = () => {
-    setEditingLifterId(null);
-    setEditingLifterDraft(null);
-  };
+  const cancelEditLifter = () => { setEditingLifterId(null); setEditingLifterDraft(null); };
 
   const saveEditLifter = () => {
     if (!editingLifterId || !editingLifterDraft) return;
-    if (!editingLifterDraft.name.trim()) {
-      setGroupNotice("Lifter name is required.");
-      return;
-    }
-
-    const updated = lifters.map((l) => {
+    if (!editingLifterDraft.name.trim()) { showNotice("Lifter name is required.", "error"); return; }
+    setLifters(lifters.map((l) => {
       if (l.id !== editingLifterId) return l;
-      return {
-        ...l,
-        name: editingLifterDraft.name.trim(),
-        sex: editingLifterDraft.sex,
-        bodyweight: editingLifterDraft.bodyweight,
-        group: editingLifterDraft.group,
-        team: editingLifterDraft.team,
-        category: editingLifterDraft.category,
-        weightClass: resolveWeightClass(editingLifterDraft.sex, editingLifterDraft.bodyweight, l.manualWeightClass),
-      };
-    });
-
-    setLifters(updated);
-    setGroupNotice("Lifter updated successfully.");
+      return { ...l, name: editingLifterDraft.name.trim(), sex: editingLifterDraft.sex, bodyweight: editingLifterDraft.bodyweight, group: editingLifterDraft.group, team: editingLifterDraft.team, category: editingLifterDraft.category, weightClass: resolveWeightClass(editingLifterDraft.sex, editingLifterDraft.bodyweight, l.manualWeightClass) };
+    }));
+    showNotice("Lifter updated.");
     cancelEditLifter();
   };
 
   const moveCheckedLiftersToGroup = () => {
-    if (!bulkTargetGroupName) {
-      setGroupNotice("Select a target group first.");
-      return;
-    }
-    if (checkedLifterIds.length === 0) {
-      setGroupNotice("Select at least one lifter.");
-      return;
-    }
-
-    const updated = lifters.map((lifter) =>
-      checkedLifterIds.includes(lifter.id) ? { ...lifter, group: bulkTargetGroupName } : lifter,
-    );
-    setLifters(updated);
+    if (!bulkTargetGroupName) { showNotice("Select a target group first.", "error"); return; }
+    if (checkedLifterIds.length === 0) { showNotice("Select at least one lifter.", "error"); return; }
+    setLifters(lifters.map((l) => checkedLifterIds.includes(l.id) ? { ...l, group: bulkTargetGroupName } : l));
+    showNotice(`Moved ${checkedLifterIds.length} lifter(s) to Group ${bulkTargetGroupName}.`);
     setCheckedLifterIds([]);
-    setGroupNotice(`Moved ${checkedLifterIds.length} lifter(s) to Group ${bulkTargetGroupName}.`);
   };
 
   const markCheckedAsDoubleCategory = () => {
-    if (checkedLifterIds.length === 0) {
-      setGroupNotice("Select at least one lifter.");
-      return;
-    }
+    if (checkedLifterIds.length === 0) { showNotice("Select at least one lifter.", "error"); return; }
     const getTargetCategory = (sex: "Male" | "Female") => {
       const options = getDoubleCategoryOptions(sex);
       if (doubleCategoryType === "SUBJR_JR") return options[0];
       if (doubleCategoryType === "JR_SR") return options[1];
       return options[2];
     };
-    const updated = lifters.map((lifter) => {
-      if (!checkedLifterIds.includes(lifter.id)) return lifter;
-      return { ...lifter, category: getTargetCategory(lifter.sex) };
-    });
-    setLifters(updated);
-    setGroupNotice(`Set dual category for ${checkedLifterIds.length} lifter(s). Attempts auto-apply to both categories.`);
+    setLifters(lifters.map((l) => !checkedLifterIds.includes(l.id) ? l : { ...l, category: getTargetCategory(l.sex) }));
+    showNotice(`Dual category applied to ${checkedLifterIds.length} lifter(s).`);
   };
 
+  const allVisibleChecked = visibleLifters.length > 0 && visibleLifters.every((l) => checkedLifterIds.includes(l.id));
+
   return (
-    <section>
+    <section className="space-y-5">
       <SectionHeader title="Groups" path="/groups" />
-      {groupNotice && (
-        <p className="mb-4 rounded-xl border border-cyan-300/30 bg-cyan-400/10 px-3 py-2 text-sm text-cyan-100">
-          {groupNotice}
-        </p>
-      )}
+
+      <AnimatePresence>
+        {groupNotice && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.2 }}
+            className={`flex items-center gap-2 rounded-xl border px-4 py-3 text-sm ${
+              groupNotice.type === "error"
+                ? "border-red-400/30 bg-red-400/10 text-red-200"
+                : "border-emerald-400/30 bg-emerald-400/10 text-emerald-100"
+            }`}
+          >
+            <span className={`h-2 w-2 rounded-full flex-shrink-0 ${groupNotice.type === "error" ? "bg-red-400" : "bg-emerald-400"}`} />
+            {groupNotice.text}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <div className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-2xl border border-white/15 bg-white/5 p-5">
-          <p className="mb-3 text-xs uppercase tracking-[0.2em] text-cyan-300">Create Group</p>
+        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
+          <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-cyan-400">Create New Group</p>
           <div className="flex gap-2">
-            <Field value={groupName} placeholder="Group name (A, B, C...)" onChange={(e) => setGroupName(e.target.value)} />
-            <button onClick={createGroup} className="rounded-xl bg-cyan-500 px-4 text-sm font-semibold text-black">
+            <Field
+              value={groupName}
+              placeholder="e.g. A, B, Morning..."
+              onChange={(e) => setGroupName(e.target.value)}
+              onKeyDown={(e: React.KeyboardEvent) => { if (e.key === "Enter") createGroup(); }}
+            />
+            <button
+              onClick={createGroup}
+              disabled={!groupName.trim()}
+              className="rounded-xl bg-cyan-500 px-5 text-sm font-semibold text-black transition-opacity disabled:cursor-not-allowed disabled:opacity-40 hover:bg-cyan-400"
+            >
               Create
             </button>
           </div>
-          <div className="mt-4 space-y-2 text-sm text-slate-300">
-            {filteredGroups.map((g) => (
-              <p key={g.id}>
-                Group {g.name} - {lifters.filter((l) => l.group === g.name).length} lifter(s) - {g.currentLift.toUpperCase()}
-              </p>
-            ))}
-            {filteredGroups.length === 0 && <p>No matching groups.</p>}
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-white/15 bg-white/5 p-5">
-          <p className="mb-3 text-xs uppercase tracking-[0.2em] text-cyan-300">Add Lifter To Group</p>
-          <div className="space-y-3">
-            <select
-              value={selectedLifterId}
-              onChange={(e) => setSelectedLifterId(e.target.value)}
-              className="h-11 w-full rounded-xl border border-white/20 bg-black/40 px-3"
-            >
-              {lifters.map((l) => (
-                <option key={l.id} value={l.id} className="bg-slate-900">
-                  {l.name}
-                </option>
-              ))}
-            </select>
-            <select
-              value={selectedGroupName}
-              onChange={(e) => setSelectedGroupName(e.target.value)}
-              className="h-11 w-full rounded-xl border border-white/20 bg-black/40 px-3"
-            >
-              {groups.length === 0 && (
-                <option value="" className="bg-slate-900">
-                  No Group
-                </option>
-              )}
-              {groups.map((g) => (
-                <option key={g.id} value={g.name} className="bg-slate-900">
-                  Group {g.name}
-                </option>
-              ))}
-            </select>
-            <button
-              onClick={assignLifter}
-              disabled={groups.length === 0}
-              className="rounded-xl bg-purple-500 px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Add To Group
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-4 rounded-2xl border border-white/15 bg-white/5 p-5">
-        <p className="mb-3 text-xs uppercase tracking-[0.2em] text-cyan-300">Search, Edit, Delete Groups</p>
-        <div className="mb-4 md:w-80">
-          <Field
-            value={searchTerm}
-            placeholder="Search groups"
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
-        </div>
-
-        <div className="space-y-2">
-          {filteredGroups.map((group) => (
-            <div
-              key={group.id}
-              className="flex flex-col gap-2 rounded-xl border border-white/10 bg-black/20 p-3 md:flex-row md:items-center md:justify-between"
-            >
-                <button
-                  onClick={() => setActiveGroupFilter((prev) => (prev === group.name ? "" : group.name))}
-                  className="w-fit text-left text-sm text-slate-200"
-                >
-                  <span className="font-semibold">Group {group.name}</span> - {lifters.filter((l) => l.group === group.name).length} lifter(s)
-                  <span className="ml-2 text-cyan-300">{activeGroupFilter === group.name ? "(Showing)" : "(Tap to show)"}</span>
-                </button>
-
-                <div className="flex flex-wrap items-center gap-2">
-                  <select
-                    value={group.currentLift}
-                    onChange={(e) => setGroupLiftStage(group.id, e.target.value as LiftType)}
-                    className="h-9 rounded-lg border border-white/20 bg-black/40 px-2 text-xs"
-                  >
-                    <option value="squat" className="bg-slate-900">Squat Stage</option>
-                    <option value="bench" className="bg-slate-900">Bench Stage</option>
-                    <option value="deadlift" className="bg-slate-900">Deadlift Stage</option>
-                  </select>
-                  <button
-                    onClick={() => setActiveGroupFilter(group.name)}
-                    className="rounded-lg bg-white/10 px-3 py-2 text-sm"
-                  >
-                    View Lifters
-                  </button>
-
-                  {editingGroupId === group.id ? (
-                    <>
-                      <input
-                        value={editingGroupName}
-                        onChange={(e) => setEditingGroupName(e.target.value)}
-                        className="h-10 rounded-lg border border-white/20 bg-black/40 px-3 text-sm"
-                      />
-                      <button onClick={saveEditGroup} className="rounded-lg bg-cyan-500 px-3 py-2 text-sm font-semibold text-black">
-                        Save
-                      </button>
-                      <button
-                        onClick={() => {
-                          setEditingGroupId(null);
-                          setEditingGroupName("");
-                        }}
-                        className="rounded-lg bg-white/10 px-3 py-2 text-sm"
-                      >
-                        Cancel
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <button
-                        onClick={() => setStartCompGroupId(startCompGroupId === group.id ? null : group.id)}
-                        className="rounded-lg bg-emerald-500 px-3 py-2 text-sm font-bold text-black"
-                      >
-                        Start Competition
-                      </button>
-                      <button
-                        onClick={() => startEditGroup(group)}
-                        className="rounded-lg bg-purple-500 px-3 py-2 text-sm font-semibold"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => deleteGroup(group)}
-                        className="rounded-lg bg-red-500 px-3 py-2 text-sm font-semibold"
-                      >
-                        Delete
-                      </button>
-                    </>
-                  )}
-                  {startCompGroupId === group.id && (
-                    <div className="mt-3 w-full rounded-xl border border-emerald-400/40 bg-emerald-900/30 p-4">
-                      <p className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-emerald-300">Select Lifts to Compete</p>
-                      <div className="mb-3 flex flex-wrap gap-4">
-                        {(["squat", "bench", "deadlift"] as LiftType[]).map((lift) => (
-                          <label key={lift} className="flex cursor-pointer items-center gap-2 text-sm text-white">
-                            <input
-                              type="checkbox"
-                              checked={compLifts[lift]}
-                              onChange={(e) => setCompLifts((prev) => ({ ...prev, [lift]: e.target.checked }))}
-                              className="h-4 w-4 accent-emerald-400"
-                            />
-                            {lift === "squat" ? "Squats" : lift === "bench" ? "Bench Press" : "Deadlift"}
-                          </label>
-                        ))}
-                      </div>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => handleStartGroupCompetition(group)}
-                          className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-bold text-black"
-                        >
-                          Confirm Start
-                        </button>
-                        <button
-                          onClick={() => setStartCompGroupId(null)}
-                          className="rounded-lg bg-white/10 px-4 py-2 text-sm"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  )}
-              </div>
+          {groups.length > 0 && (
+            <div className="mt-4 space-y-1.5">
+              {groups.map((g) => {
+                const count = lifters.filter((l) => l.group === g.name).length;
+                return (
+                  <div key={g.id} className="flex items-center justify-between rounded-lg bg-white/5 px-3 py-2">
+                    <span className="text-sm font-medium text-white">Group {g.name}</span>
+                    <span className="text-xs text-slate-400">{count} lifter{count !== 1 ? "s" : ""}</span>
+                  </div>
+                );
+              })}
             </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="mt-4 rounded-2xl border border-white/15 bg-white/5 p-5">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <p className="text-xs uppercase tracking-[0.2em] text-cyan-300">Group Lifter Filter</p>
-          {activeGroupFilter && (
-            <button onClick={() => setActiveGroupFilter("")} className="rounded-lg bg-white/10 px-3 py-1.5 text-xs">
-              Clear Filter
-            </button>
+          )}
+          {groups.length === 0 && (
+            <p className="mt-4 text-sm text-slate-500">No groups yet. Create one above.</p>
           )}
         </div>
-        <p className="mb-3 text-sm text-slate-300">
-          {activeGroupFilter ? `Showing lifters in Group ${activeGroupFilter}` : "Showing all lifters"}
-        </p>
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          <select
-            value={bulkTargetGroupName}
-            onChange={(e) => setBulkTargetGroupName(e.target.value)}
-            className="h-10 rounded-lg border border-white/20 bg-black/40 px-3 text-sm"
-          >
-            <option value="" className="bg-slate-900">Select target group</option>
-            {groups.map((group) => (
-              <option key={group.id} value={group.name} className="bg-slate-900">
-                Group {group.name}
-              </option>
-            ))}
-          </select>
-          <button
-            onClick={moveCheckedLiftersToGroup}
-            className="rounded-lg bg-cyan-500 px-3 py-2 text-xs font-semibold text-black"
-          >
-            Move Checked Lifters
-          </button>
-          <button
-            onClick={markCheckedAsDoubleCategory}
-            className="rounded-lg bg-violet-500 px-3 py-2 text-xs font-semibold text-white"
-          >
-            Set Checked Dual Category
-          </button>
-          <select
-            value={doubleCategoryType}
-            onChange={(e) => setDoubleCategoryType(e.target.value as "SUBJR_JR" | "JR_SR" | "SR_M1")}
-            className="h-10 rounded-lg border border-white/20 bg-black/40 px-3 text-xs"
-          >
-            <option value="SUBJR_JR" className="bg-slate-900">Sub-Junior + Junior</option>
-            <option value="JR_SR" className="bg-slate-900">Junior + Senior</option>
-            <option value="SR_M1" className="bg-slate-900">Senior + Master</option>
-          </select>
-          <button
-            onClick={() => setCheckedLifterIds(visibleLifters.map((lifter) => lifter.id))}
-            className="rounded-lg bg-white/10 px-3 py-2 text-xs"
-          >
-            Check All
-          </button>
-          <button
-            onClick={() => setCheckedLifterIds([])}
-            className="rounded-lg bg-white/10 px-3 py-2 text-xs"
-          >
-            Clear Checked
-          </button>
+
+        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
+          <div className="mb-4 flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-widest text-cyan-400">Quick Assign Lifter</p>
+            <button
+              onClick={() => setShowAddLifterPanel((v) => !v)}
+              className="rounded-lg bg-white/10 px-3 py-1.5 text-xs text-slate-300 transition-colors hover:bg-white/15"
+            >
+              {showAddLifterPanel ? "Collapse" : "Expand"}
+            </button>
+          </div>
+          <AnimatePresence initial={false}>
+            {showAddLifterPanel && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.2 }}
+                className="overflow-hidden"
+              >
+                <div className="space-y-3 pb-1">
+                  <div>
+                    <label className="mb-1 block text-xs text-slate-400">Lifter</label>
+                    <select
+                      value={selectedLifterId}
+                      onChange={(e) => setSelectedLifterId(e.target.value)}
+                      className="h-10 w-full rounded-xl border border-white/15 bg-black/40 px-3 text-sm text-white focus:border-cyan-400/60 focus:outline-none"
+                    >
+                      {lifters.length === 0 && <option value="">No lifters added yet</option>}
+                      {lifters.map((l) => (
+                        <option key={l.id} value={l.id} className="bg-slate-900">
+                          {l.name}{l.group ? ` (Group ${l.group})` : " (Ungrouped)"}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs text-slate-400">Target Group</label>
+                    <select
+                      value={selectedGroupName}
+                      onChange={(e) => setSelectedGroupName(e.target.value)}
+                      className="h-10 w-full rounded-xl border border-white/15 bg-black/40 px-3 text-sm text-white focus:border-cyan-400/60 focus:outline-none"
+                    >
+                      {groups.length === 0 && <option value="">No groups yet</option>}
+                      {groups.map((g) => (
+                        <option key={g.id} value={g.name} className="bg-slate-900">Group {g.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <button
+                    onClick={assignLifter}
+                    disabled={groups.length === 0 || lifters.length === 0}
+                    className="w-full rounded-xl bg-cyan-500 py-2 text-sm font-semibold text-black transition-opacity disabled:cursor-not-allowed disabled:opacity-40 hover:bg-cyan-400"
+                  >
+                    Assign to Group
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+          {!showAddLifterPanel && (
+            <p className="text-sm text-slate-500">Click Expand to assign a lifter to a group.</p>
+          )}
         </div>
-        <div className="overflow-x-auto rounded-xl border border-white/10 bg-black/20">
+      </div>
+
+      <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+          <p className="text-xs font-semibold uppercase tracking-widest text-cyan-400">Manage Groups</p>
+          <div className="ml-auto w-full sm:w-64">
+            <Field
+              value={searchTerm}
+              placeholder="Search groups..."
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+        </div>
+
+        {filteredGroups.length === 0 && (
+          <p className="text-sm text-slate-500">{searchTerm ? "No groups match your search." : "No groups created yet."}</p>
+        )}
+
+        <div className="space-y-3">
+          {filteredGroups.map((group) => {
+            const groupLifterCount = lifters.filter((l) => l.group === group.name).length;
+            const isEditingThis = editingGroupId === group.id;
+            const isStartingComp = startCompGroupId === group.id;
+            const isConfirmingDelete = confirmDeleteGroupId === group.id;
+            const isActive = activeGroupFilter === group.name;
+
+            return (
+              <div
+                key={group.id}
+                className={`rounded-2xl border transition-colors ${isActive ? "border-cyan-500/40 bg-cyan-900/10" : "border-white/10 bg-white/[0.02]"}`}
+              >
+                <div className="flex flex-wrap items-center gap-3 p-4">
+                  <div className="flex min-w-0 flex-1 items-center gap-3">
+                    <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-white/10 text-sm font-bold text-white">
+                      {group.name.charAt(0)}
+                    </div>
+                    <div className="min-w-0">
+                      {isEditingThis ? (
+                        <input
+                          autoFocus
+                          value={editingGroupName}
+                          onChange={(e) => setEditingGroupName(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") saveEditGroup(); if (e.key === "Escape") { setEditingGroupId(null); setEditingGroupName(""); } }}
+                          className="h-8 w-40 rounded-lg border border-cyan-400/60 bg-black/40 px-2 text-sm font-semibold text-white focus:outline-none"
+                        />
+                      ) : (
+                        <p className="font-semibold text-white">Group {group.name}</p>
+                      )}
+                      <p className="text-xs text-slate-400">{groupLifterCount} lifter{groupLifterCount !== 1 ? "s" : ""}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex overflow-hidden rounded-lg border border-white/10">
+                      {LIFT_STAGE_OPTIONS.map((opt) => (
+                        <button
+                          key={opt.value}
+                          onClick={() => setGroupLiftStage(group.id, opt.value)}
+                          className={`px-3 py-1.5 text-xs font-medium transition-colors ${group.currentLift === opt.value ? LIFT_STAGE_COLORS[opt.value] : "text-slate-400 hover:text-white"}`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    <button
+                      onClick={() => setActiveGroupFilter(isActive ? "" : group.name)}
+                      className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${isActive ? "bg-cyan-500/20 text-cyan-300" : "bg-white/8 text-slate-300 hover:bg-white/15"}`}
+                    >
+                      {isActive ? "Viewing" : "View Lifters"}
+                    </button>
+
+                    {isEditingThis ? (
+                      <>
+                        <button onClick={saveEditGroup} className="rounded-lg bg-cyan-500 px-3 py-1.5 text-xs font-semibold text-black hover:bg-cyan-400">Save</button>
+                        <button onClick={() => { setEditingGroupId(null); setEditingGroupName(""); }} className="rounded-lg bg-white/10 px-3 py-1.5 text-xs text-slate-300 hover:bg-white/15">Cancel</button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => { setStartCompGroupId(isStartingComp ? null : group.id); setConfirmDeleteGroupId(null); }}
+                          className="rounded-lg bg-emerald-500/20 px-3 py-1.5 text-xs font-semibold text-emerald-300 transition-colors hover:bg-emerald-500/30"
+                        >
+                          Start Comp
+                        </button>
+                        <button
+                          onClick={() => { startEditGroup(group); setStartCompGroupId(null); setConfirmDeleteGroupId(null); }}
+                          className="rounded-lg bg-white/8 px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-white/15"
+                        >
+                          Rename
+                        </button>
+                        <button
+                          onClick={() => { setConfirmDeleteGroupId(isConfirmingDelete ? null : group.id); setStartCompGroupId(null); }}
+                          className="rounded-lg bg-red-500/15 px-3 py-1.5 text-xs font-medium text-red-300 transition-colors hover:bg-red-500/25"
+                        >
+                          Delete
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                <AnimatePresence initial={false}>
+                  {isConfirmingDelete && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.18 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="mx-4 mb-4 rounded-xl border border-red-500/30 bg-red-900/20 p-4">
+                        <p className="mb-3 text-sm text-red-200">
+                          Delete Group <strong>{group.name}</strong>?{" "}
+                          {groups.find((g) => g.id !== group.id)
+                            ? `${groupLifterCount} lifter(s) will be moved to Group ${groups.find((g) => g.id !== group.id)!.name}.`
+                            : `${groupLifterCount} lifter(s) will become ungrouped.`}
+                        </p>
+                        <div className="flex gap-2">
+                          <button onClick={() => deleteGroup(group)} className="rounded-lg bg-red-500 px-4 py-2 text-xs font-semibold text-white hover:bg-red-400">Confirm Delete</button>
+                          <button onClick={() => setConfirmDeleteGroupId(null)} className="rounded-lg bg-white/10 px-4 py-2 text-xs text-slate-300 hover:bg-white/15">Cancel</button>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                <AnimatePresence initial={false}>
+                  {isStartingComp && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.18 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="mx-4 mb-4 rounded-xl border border-emerald-500/30 bg-emerald-900/15 p-4">
+                        <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-emerald-400">Lifts to include</p>
+                        <div className="mb-4 flex flex-wrap gap-3">
+                          {(["squat", "bench", "deadlift"] as LiftType[]).map((lift) => (
+                            <label key={lift} className="flex cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white transition-colors hover:bg-white/10">
+                              <input
+                                type="checkbox"
+                                checked={compLifts[lift]}
+                                onChange={(e) => setCompLifts((prev) => ({ ...prev, [lift]: e.target.checked }))}
+                                className="h-4 w-4 accent-emerald-400"
+                              />
+                              {lift === "squat" ? "Squat" : lift === "bench" ? "Bench Press" : "Deadlift"}
+                            </label>
+                          ))}
+                        </div>
+                        <div className="flex gap-2">
+                          <button onClick={() => handleStartGroupCompetition(group)} className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-bold text-black hover:bg-emerald-400">
+                            Start Competition
+                          </button>
+                          <button onClick={() => setStartCompGroupId(null)} className="rounded-lg bg-white/10 px-4 py-2 text-sm text-slate-300 hover:bg-white/15">Cancel</button>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-widest text-cyan-400">Lifters</p>
+            <p className="mt-0.5 text-xs text-slate-500">
+              {activeGroupFilter ? `Showing Group ${activeGroupFilter}` : "Showing all lifters"} — {visibleLifters.length} total
+            </p>
+          </div>
+          {groups.length > 0 && (
+            <div className="ml-auto flex flex-wrap gap-2">
+              <button
+                onClick={() => setActiveGroupFilter("")}
+                className={`rounded-lg px-3 py-1.5 text-xs transition-colors ${!activeGroupFilter ? "bg-cyan-500/20 text-cyan-300" : "bg-white/8 text-slate-400 hover:bg-white/12"}`}
+              >
+                All
+              </button>
+              {groups.map((g) => (
+                <button
+                  key={g.id}
+                  onClick={() => setActiveGroupFilter(activeGroupFilter === g.name ? "" : g.name)}
+                  className={`rounded-lg px-3 py-1.5 text-xs transition-colors ${activeGroupFilter === g.name ? "bg-cyan-500/20 text-cyan-300" : "bg-white/8 text-slate-400 hover:bg-white/12"}`}
+                >
+                  Group {g.name}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {checkedLifterIds.length > 0 && (
+          <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-cyan-500/20 bg-cyan-900/10 p-3">
+            <span className="text-xs font-semibold text-cyan-300">{checkedLifterIds.length} selected</span>
+            <div className="flex flex-wrap gap-2">
+              <select
+                value={bulkTargetGroupName}
+                onChange={(e) => setBulkTargetGroupName(e.target.value)}
+                className="h-8 rounded-lg border border-white/15 bg-black/40 px-2 text-xs text-white focus:outline-none"
+              >
+                <option value="">Select group</option>
+                {groups.map((g) => (
+                  <option key={g.id} value={g.name} className="bg-slate-900">Group {g.name}</option>
+                ))}
+              </select>
+              <button onClick={moveCheckedLiftersToGroup} className="rounded-lg bg-cyan-500 px-3 py-1 text-xs font-semibold text-black hover:bg-cyan-400">
+                Move to Group
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <select
+                value={doubleCategoryType}
+                onChange={(e) => setDoubleCategoryType(e.target.value as "SUBJR_JR" | "JR_SR" | "SR_M1")}
+                className="h-8 rounded-lg border border-white/15 bg-black/40 px-2 text-xs text-white focus:outline-none"
+              >
+                <option value="SUBJR_JR" className="bg-slate-900">Sub-Junior + Junior</option>
+                <option value="JR_SR" className="bg-slate-900">Junior + Senior</option>
+                <option value="SR_M1" className="bg-slate-900">Senior + Master</option>
+              </select>
+              <button onClick={markCheckedAsDoubleCategory} className="rounded-lg bg-white/10 px-3 py-1 text-xs text-slate-200 hover:bg-white/15">
+                Set Dual Category
+              </button>
+            </div>
+            <button onClick={() => setCheckedLifterIds([])} className="ml-auto rounded-lg bg-white/8 px-3 py-1 text-xs text-slate-400 hover:bg-white/12">
+              Clear
+            </button>
+          </div>
+        )}
+
+        <div className="overflow-x-auto rounded-xl border border-white/8">
           <table className="min-w-full text-sm">
-            <thead className="bg-white/5 text-left text-slate-300">
-              <tr>
-                <th className="px-4 py-3">Select</th>
-                <th className="px-4 py-3">Lifter</th>
-                <th className="px-4 py-3">Group</th>
-                <th className="px-4 py-3">Category</th>
-                <th className="px-4 py-3">Weight Class</th>
-                <th className="px-4 py-3">Team</th>
-                <th className="px-4 py-3">Action</th>
+            <thead>
+              <tr className="border-b border-white/8 bg-white/[0.03]">
+                <th className="px-4 py-3 text-left">
+                  <input
+                    type="checkbox"
+                    checked={allVisibleChecked}
+                    onChange={(e) => setCheckedLifterIds(e.target.checked ? visibleLifters.map((l) => l.id) : [])}
+                    className="h-4 w-4 accent-cyan-400"
+                  />
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Lifter</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Group</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Category</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Wt Class</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Team</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {visibleLifters.map((l) => {
+              {visibleLifters.map((l, idx) => {
                 const isEditing = editingLifterId === l.id && editingLifterDraft;
+                const isChecked = checkedLifterIds.includes(l.id);
                 return (
-                  <tr key={l.id} className="border-t border-white/10">
+                  <tr
+                    key={l.id}
+                    className={`border-b border-white/5 transition-colors last:border-0 ${isChecked ? "bg-cyan-900/10" : idx % 2 === 0 ? "bg-transparent" : "bg-white/[0.015]"} ${isEditing ? "bg-white/[0.04]" : ""}`}
+                  >
                     <td className="px-4 py-3">
                       <input
                         type="checkbox"
-                        checked={checkedLifterIds.includes(l.id)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setCheckedLifterIds((prev) => (prev.includes(l.id) ? prev : [...prev, l.id]));
-                          } else {
-                            setCheckedLifterIds((prev) => prev.filter((id) => id !== l.id));
-                          }
-                        }}
+                        checked={isChecked}
+                        onChange={(e) => setCheckedLifterIds((prev) => e.target.checked ? [...prev.filter((id) => id !== l.id), l.id] : prev.filter((id) => id !== l.id))}
+                        className="h-4 w-4 accent-cyan-400"
                       />
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 font-medium text-white">
                       {isEditing ? (
                         <input
+                          autoFocus
                           value={editingLifterDraft.name}
-                          onChange={(e) =>
-                            setEditingLifterDraft((prev) => (prev ? { ...prev, name: e.target.value } : prev))
-                          }
-                          className="h-9 w-full min-w-36 rounded-lg border border-white/20 bg-black/40 px-2 text-sm"
+                          onChange={(e) => setEditingLifterDraft((prev) => prev ? { ...prev, name: e.target.value } : prev)}
+                          className="h-9 w-full min-w-36 rounded-lg border border-white/20 bg-black/40 px-2 text-sm focus:outline-none focus:border-cyan-400/60"
                         />
-                      ) : (
-                        l.name
-                      )}
+                      ) : l.name}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 text-slate-300">
                       {isEditing ? (
                         <select
                           value={editingLifterDraft.group}
-                          onChange={(e) =>
-                            setEditingLifterDraft((prev) => (prev ? { ...prev, group: e.target.value } : prev))
-                          }
-                          className="h-9 min-w-32 rounded-lg border border-white/20 bg-black/40 px-2 text-sm"
+                          onChange={(e) => setEditingLifterDraft((prev) => prev ? { ...prev, group: e.target.value } : prev)}
+                          className="h-9 min-w-28 rounded-lg border border-white/20 bg-black/40 px-2 text-sm focus:outline-none"
                         >
-                          <option value="" className="bg-slate-900">
-                            Ungrouped
-                          </option>
-                          {groups.map((g) => (
-                            <option key={g.id} value={g.name} className="bg-slate-900">
-                              Group {g.name}
-                            </option>
-                          ))}
+                          <option value="" className="bg-slate-900">Ungrouped</option>
+                          {groups.map((g) => <option key={g.id} value={g.name} className="bg-slate-900">Group {g.name}</option>)}
                         </select>
                       ) : (
-                        l.group || "Ungrouped"
+                        <span className={`rounded-md px-2 py-0.5 text-xs ${l.group ? "bg-white/8 text-slate-200" : "text-slate-500"}`}>
+                          {l.group ? `Group ${l.group}` : "Ungrouped"}
+                        </span>
                       )}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 text-slate-300">
                       {isEditing ? (
                         <select
                           value={editingLifterDraft.category}
-                          onChange={(e) =>
-                            setEditingLifterDraft((prev) => (prev ? { ...prev, category: e.target.value } : prev))
-                          }
-                          className="h-9 min-w-44 rounded-lg border border-white/20 bg-black/40 px-2 text-sm"
+                          onChange={(e) => setEditingLifterDraft((prev) => prev ? { ...prev, category: e.target.value } : prev)}
+                          className="h-9 min-w-40 rounded-lg border border-white/20 bg-black/40 px-2 text-sm focus:outline-none"
                         >
-                          {getCategoryOptions(editingLifterDraft.sex).map((category) => (
-                            <option key={category} value={category} className="bg-slate-900">
-                              {category}
-                            </option>
-                          ))}
+                          {getCategoryOptions(editingLifterDraft.sex).map((cat) => <option key={cat} value={cat} className="bg-slate-900">{cat}</option>)}
                         </select>
-                      ) : (
-                        l.category
-                      )}
+                      ) : <span className="text-xs">{l.category}</span>}
                     </td>
-                    <td className="px-4 py-3">
-                      {isEditing
-                        ? getIPFWeightClass(editingLifterDraft.sex, editingLifterDraft.bodyweight) || "-"
-                        : l.weightClass || "-"}
+                    <td className="px-4 py-3 text-slate-300">
+                      {isEditing ? getIPFWeightClass(editingLifterDraft.sex, editingLifterDraft.bodyweight) || "—" : l.weightClass || "—"}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 text-slate-300">
                       {isEditing ? (
                         <input
                           value={editingLifterDraft.team}
-                          onChange={(e) =>
-                            setEditingLifterDraft((prev) => (prev ? { ...prev, team: e.target.value } : prev))
-                          }
-                          className="h-9 w-full min-w-28 rounded-lg border border-white/20 bg-black/40 px-2 text-sm"
+                          onChange={(e) => setEditingLifterDraft((prev) => prev ? { ...prev, team: e.target.value } : prev)}
+                          className="h-9 w-full min-w-24 rounded-lg border border-white/20 bg-black/40 px-2 text-sm focus:outline-none"
                         />
-                      ) : (
-                        l.team || "-"
-                      )}
+                      ) : <span className="text-xs">{l.team || "—"}</span>}
                     </td>
                     <td className="px-4 py-3">
                       {isEditing ? (
-                        <div className="flex gap-2">
+                        <div className="flex flex-wrap gap-2">
                           <select
                             value={editingLifterDraft.sex}
-                            onChange={(e) =>
-                              setEditingLifterDraft((prev) =>
-                                prev ? { ...prev, sex: e.target.value as "Male" | "Female" } : prev,
-                              )
-                            }
-                            className="h-9 rounded-lg border border-white/20 bg-black/40 px-2 text-sm"
+                            onChange={(e) => setEditingLifterDraft((prev) => prev ? { ...prev, sex: e.target.value as "Male" | "Female" } : prev)}
+                            className="h-9 rounded-lg border border-white/20 bg-black/40 px-2 text-sm focus:outline-none"
                           >
-                            <option value="Male" className="bg-slate-900">
-                              Male
-                            </option>
-                            <option value="Female" className="bg-slate-900">
-                              Female
-                            </option>
+                            <option value="Male" className="bg-slate-900">Male</option>
+                            <option value="Female" className="bg-slate-900">Female</option>
                           </select>
                           <input
                             type="number"
                             value={editingLifterDraft.bodyweight}
-                            onChange={(e) =>
-                              setEditingLifterDraft((prev) =>
-                                prev
-                                  ? {
-                                      ...prev,
-                                      bodyweight: e.target.value === "" ? "" : Number(e.target.value),
-                                    }
-                                  : prev,
-                              )
-                            }
-                            placeholder="BW"
-                            className="h-9 w-20 rounded-lg border border-white/20 bg-black/40 px-2 text-sm"
+                            onChange={(e) => setEditingLifterDraft((prev) => prev ? { ...prev, bodyweight: e.target.value === "" ? "" : Number(e.target.value) } : prev)}
+                            placeholder="BW kg"
+                            className="h-9 w-20 rounded-lg border border-white/20 bg-black/40 px-2 text-sm focus:outline-none"
                           />
-                          <button
-                            onClick={saveEditLifter}
-                            className="rounded-lg bg-cyan-500 px-3 py-1.5 text-xs font-semibold text-black"
-                          >
-                            Save
-                          </button>
-                          <button onClick={cancelEditLifter} className="rounded-lg bg-white/10 px-3 py-1.5 text-xs">
-                            Cancel
-                          </button>
+                          <button onClick={saveEditLifter} className="rounded-lg bg-cyan-500 px-3 py-1.5 text-xs font-semibold text-black hover:bg-cyan-400">Save</button>
+                          <button onClick={cancelEditLifter} className="rounded-lg bg-white/10 px-3 py-1.5 text-xs text-slate-300 hover:bg-white/15">Cancel</button>
                         </div>
                       ) : (
-                        <button
-                          onClick={() => startEditLifter(l)}
-                          className="rounded-lg bg-purple-500 px-3 py-1.5 text-xs font-semibold"
-                        >
+                        <button onClick={() => startEditLifter(l)} className="rounded-lg bg-white/8 px-3 py-1.5 text-xs font-medium text-slate-300 transition-colors hover:bg-white/15">
                           Edit
                         </button>
                       )}
@@ -4020,8 +4031,8 @@ const GroupManagementPage = () => {
               })}
               {visibleLifters.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-4 text-center text-slate-300">
-                    No lifters found for this group.
+                  <td colSpan={7} className="px-4 py-8 text-center text-sm text-slate-500">
+                    {activeGroupFilter ? `No lifters in Group ${activeGroupFilter}.` : "No lifters added yet."}
                   </td>
                 </tr>
               )}
