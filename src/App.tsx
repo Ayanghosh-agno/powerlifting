@@ -3420,6 +3420,8 @@ const GroupManagementPage = () => {
   const [selectedGroupName, setSelectedGroupName] = useState(groups[0]?.name ?? "");
   const [lifterSearchTerm, setLifterSearchTerm] = useState("");
   const [selectedWeightClassFilter, setSelectedWeightClassFilter] = useState("");
+  const [suggestedGroupNames, setSuggestedGroupNames] = useState<string[]>([]);
+  const [checkedSuggestedGroups, setCheckedSuggestedGroups] = useState<Set<string>>(new Set());
 
   const showNotice = (text: string, type: "info" | "success" | "error" = "success") => {
     if (noticeTimerRef.current) window.clearTimeout(noticeTimerRef.current);
@@ -3428,6 +3430,30 @@ const GroupManagementPage = () => {
   };
 
   useEffect(() => () => { if (noticeTimerRef.current) window.clearTimeout(noticeTimerRef.current); }, []);
+
+  const generateSuggestedGroups = () => {
+    const weightClasses = Array.from(new Set(lifters.map((l) => l.weightClass).filter(Boolean)));
+    const existingGroupNames = new Set(groups.map((g) => g.name));
+    const suggested = weightClasses.filter((wc) => !existingGroupNames.has(wc));
+    setSuggestedGroupNames(suggested);
+    setCheckedSuggestedGroups(new Set(suggested));
+  };
+
+  const createMultipleGroups = () => {
+    const groupsToCreate = Array.from(checkedSuggestedGroups);
+    if (groupsToCreate.length === 0) { showNotice("Select at least one group to create.", "error"); return; }
+
+    const newGroups = groupsToCreate.map((name) => ({
+      id: `group-${Date.now()}-${Math.random()}`,
+      name: name.toUpperCase(),
+      currentLift: "squat" as LiftType,
+    }));
+
+    setGroups([...groups, ...newGroups]);
+    setSuggestedGroupNames([]);
+    setCheckedSuggestedGroups(new Set());
+    showNotice(`Created ${newGroups.length} group(s).`);
+  };
 
   const filteredGroups = useMemo(() => {
     const query = searchTerm.trim().toUpperCase();
@@ -3682,6 +3708,63 @@ const GroupManagementPage = () => {
               Create
             </button>
           </div>
+
+          {suggestedGroupNames.length === 0 && lifters.length > 0 && (
+            <button
+              onClick={generateSuggestedGroups}
+              className="mt-3 w-full rounded-lg border border-cyan-400/30 bg-cyan-400/5 px-3 py-2 text-xs font-medium text-cyan-300 transition-colors hover:bg-cyan-400/10"
+            >
+              Suggest Groups by Weight Class
+            </button>
+          )}
+
+          {suggestedGroupNames.length > 0 && (
+            <div className="mt-4 space-y-3">
+              <div className="rounded-lg border border-cyan-400/30 bg-cyan-400/5 p-3">
+                <p className="mb-3 text-xs font-semibold text-cyan-300">Suggested Groups by Weight Class</p>
+                <div className="space-y-2">
+                  {suggestedGroupNames.map((name) => (
+                    <label key={name} className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={checkedSuggestedGroups.has(name)}
+                        onChange={(e) => {
+                          const updated = new Set(checkedSuggestedGroups);
+                          if (e.target.checked) {
+                            updated.add(name);
+                          } else {
+                            updated.delete(name);
+                          }
+                          setCheckedSuggestedGroups(updated);
+                        }}
+                        className="h-4 w-4 rounded border-white/30 bg-white/5 accent-cyan-500"
+                      />
+                      <span className="text-sm text-slate-300">{name}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="mt-3 flex gap-2">
+                  <button
+                    onClick={createMultipleGroups}
+                    disabled={checkedSuggestedGroups.size === 0}
+                    className="flex-1 rounded-lg bg-cyan-500 px-3 py-1.5 text-xs font-semibold text-black transition-opacity disabled:cursor-not-allowed disabled:opacity-40 hover:bg-cyan-400"
+                  >
+                    Create {checkedSuggestedGroups.size > 0 ? `(${checkedSuggestedGroups.size})` : ""}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setSuggestedGroupNames([]);
+                      setCheckedSuggestedGroups(new Set());
+                    }}
+                    className="rounded-lg bg-white/10 px-3 py-1.5 text-xs font-medium text-slate-300 transition-colors hover:bg-white/15"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {groups.length > 0 && (
             <div className="mt-4 space-y-1.5">
               {groups.map((g) => {
@@ -3695,8 +3778,8 @@ const GroupManagementPage = () => {
               })}
             </div>
           )}
-          {groups.length === 0 && (
-            <p className="mt-4 text-sm text-slate-500">No groups yet. Create one above.</p>
+          {groups.length === 0 && suggestedGroupNames.length === 0 && (
+            <p className="mt-4 text-sm text-slate-500">No groups yet. Create one above or suggest by weight class.</p>
           )}
         </div>
 
