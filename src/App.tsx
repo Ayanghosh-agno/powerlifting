@@ -4998,7 +4998,7 @@ const ResultsTable = memo(({
     const isGuest = isDual && groupName !== undefined && lifter.group !== groupName;
 
     let displayCategory = lifter.category || "-";
-    if (isDual && groupName !== undefined && isGuest) {
+    if (isDual && groupName !== undefined) {
       const [firstPart, secondPart] = getDualCategoryParts(lifter.category);
       const groupNameLower = groupName.toLowerCase();
 
