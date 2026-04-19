@@ -5493,18 +5493,18 @@ const DisplayFullPage = () => {
         if (allGood) {
           setOverlayPhase("circles");
           overlayPhaseTimeoutRef.current = window.setTimeout(() => setOverlayPhase("lift"), 2000);
-          overlayHideTimeoutRef.current = window.setTimeout(() => {
+          overlayHideTimeoutRef.current = window.setTimeout(async () => {
             setOverlayPhase(null);
             setDisplaySignals([null, null, null]);
-            if (clearSignals) clearSignals();
+            if (clearSignals) await clearSignals();
           }, RESULT_OVERLAY_DISPLAY_MS);
         } else {
           setOverlayPhase("no-lift");
-          overlayHideTimeoutRef.current = window.setTimeout(() => {
+          overlayHideTimeoutRef.current = window.setTimeout(async () => {
             setOverlayPhase(null);
             setShowSignalOverlay(false);
             setDisplaySignals([null, null, null]);
-            if (clearSignals) clearSignals();
+            if (clearSignals) await clearSignals();
           }, RESULT_OVERLAY_DISPLAY_MS);
         }
       }
