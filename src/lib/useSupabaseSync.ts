@@ -171,6 +171,7 @@ export function useSupabaseSync(
   const compSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lifterSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const groupSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const presenceChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
   const { onCompetitionsLoaded, onRefereeSignalsChanged, onDevicesChanged } = callbacks;
 
@@ -327,24 +328,35 @@ export function useSupabaseSync(
   useEffect(() => {
     if (!activeCompetitionId) return;
 
-    const slots: ConnectedRefereeSlots = { left: false, center: false, right: false };
+    const rebuildSlots = (state: Record<string, { position: number }[]>) => {
+      const slots: ConnectedRefereeSlots = { left: false, center: false, right: false };
+      for (const presences of Object.values(state)) {
+        for (const p of presences) {
+          const slot = POSITION_TO_SLOT[p.position];
+          if (slot) slots[slot] = true;
+        }
+      }
+      return slots;
+    };
 
-    const channels = [0, 1, 2].map((index) => {
-      const ch = supabase
-        .channel(`referee-station-${activeCompetitionId}-${index}`)
-        .on("presence", { event: "sync" }, () => {
-          const state = ch.presenceState<{ position: number }>();
-          const connected = Object.values(state).flat().some((p) => p.position === index);
-          const slotName = POSITION_TO_SLOT[index];
-          slots[slotName] = connected;
-          onDevicesChanged({ ...slots });
-        })
-        .subscribe();
-      return ch;
-    });
+    const ch = supabase
+      .channel(`referee-presence-observer-${activeCompetitionId}`)
+      .on("presence", { event: "sync" }, () => {
+        onDevicesChanged(rebuildSlots(ch.presenceState<{ position: number }>()));
+      })
+      .on("presence", { event: "join" }, () => {
+        onDevicesChanged(rebuildSlots(ch.presenceState<{ position: number }>()));
+      })
+      .on("presence", { event: "leave" }, () => {
+        onDevicesChanged(rebuildSlots(ch.presenceState<{ position: number }>()));
+      })
+      .subscribe();
+
+    presenceChannelRef.current = ch;
 
     return () => {
-      channels.forEach((ch) => supabase.removeChannel(ch));
+      presenceChannelRef.current = null;
+      supabase.removeChannel(ch);
     };
   }, [activeCompetitionId, onDevicesChanged]);
 
@@ -389,6 +401,24 @@ export function useSupabaseSync(
     }
   }, []);
 
+  const trackPresence = useCallback(async (position: number) => {
+    const ch = presenceChannelRef.current;
+    if (!ch) return;
+    try {
+      await ch.track({ position });
+    } catch {
+    }
+  }, []);
+
+  const untrackPresence = useCallback(() => {
+    const ch = presenceChannelRef.current;
+    if (!ch) return;
+    try {
+      ch.untrack();
+    } catch {
+    }
+  }, []);
+
   return {
     publishSignal,
     clearSignals,
@@ -396,5 +426,7 @@ export function useSupabaseSync(
     deleteCompetitionFromDb,
     updateCompetitionNameInDb,
     dbReady: dbReadyRef.current,
+    trackPresence,
+    untrackPresence,
   };
 }

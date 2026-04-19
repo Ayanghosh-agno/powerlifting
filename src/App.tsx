@@ -99,6 +99,8 @@ type AppContextValue = {
   resetSignals: () => void;
   connectedRefereeSlots: ConnectedRefereeSlots;
   publishRefereeSignal: (position: number, signal: RefSignal) => Promise<void>;
+  trackRefereePresence: (position: number) => Promise<void>;
+  untrackRefereePresence: () => void;
 };
 
 type PersistedState = {
@@ -776,6 +778,8 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     createCompetitionInDb,
     deleteCompetitionFromDb,
     updateCompetitionNameInDb,
+    trackPresence,
+    untrackPresence,
   } = useSupabaseSync(
     activeCompetitionId,
     competitions,
@@ -1504,6 +1508,8 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
         resetSignals,
         connectedRefereeSlots,
         publishRefereeSignal: publishSignal,
+        trackRefereePresence: trackPresence,
+        untrackRefereePresence: untrackPresence,
       }}
     >
       {children}
@@ -4246,6 +4252,8 @@ const RefereeStationPage = () => {
     setRefereeSignals,
     applyRefereeDecision,
     publishRefereeSignal,
+    trackRefereePresence,
+    untrackRefereePresence,
   } = useAppContext();
   const [decisionEndsAt, setDecisionEndsAt] = useState<number | null>(null);
   const [pendingDecision, setPendingDecision] = useState<Exclude<RefSignal, null> | null>(null);
@@ -4288,21 +4296,14 @@ const RefereeStationPage = () => {
 
   useEffect(() => {
     if (!config || !activeCompetitionId) return;
-
-    const channel = supabase
-      .channel(`referee-station-${activeCompetitionId}-${config.index}`)
-      .on("presence", { event: "sync" }, () => {})
-      .subscribe(async (status) => {
-        if (status === "SUBSCRIBED") {
-          await channel.track({ position: config.index });
-        }
-      });
-
+    const timer = window.setTimeout(() => {
+      trackRefereePresence(config.index);
+    }, 500);
     return () => {
-      channel.untrack();
-      supabase.removeChannel(channel);
+      window.clearTimeout(timer);
+      untrackRefereePresence();
     };
-  }, [activeCompetitionId, config]);
+  }, [activeCompetitionId, config, trackRefereePresence, untrackRefereePresence]);
 
   useEffect(() => {
     if (refereeSignals.every((signal) => signal !== null)) {
