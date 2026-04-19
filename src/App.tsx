@@ -1302,7 +1302,8 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
 
   const resetSignals = useCallback(() => {
     setRefereeSignals([null, null, null]);
-  }, []);
+    clearSignals();
+  }, [clearSignals]);
 
   const submitNextAttempt = (weight: number) => {
     if (weight <= 0) return { ok: false, message: "Weight must be greater than 0." };
@@ -5492,6 +5493,7 @@ const DisplayFullPage = () => {
             setOverlayPhase(null);
             setDisplaySignals([null, null, null]);
             setRefereeSignals([null, null, null]);
+            clearSignals();
           }, RESULT_OVERLAY_DISPLAY_MS);
         } else {
           setOverlayPhase("no-lift");
@@ -5500,6 +5502,7 @@ const DisplayFullPage = () => {
             setShowSignalOverlay(false);
             setDisplaySignals([null, null, null]);
             setRefereeSignals([null, null, null]);
+            clearSignals();
           }, RESULT_OVERLAY_DISPLAY_MS);
         }
       }
