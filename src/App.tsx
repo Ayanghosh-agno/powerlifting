@@ -1095,6 +1095,12 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     initializeStateManager(broadcast);
   }, [broadcast]);
 
+  const setTimerState = (phase: TimerPhase, endsAt: number | null) => {
+    setTimerPhaseState(phase);
+    setTimerEndsAtState(endsAt);
+    broadcast({ timerPhase: phase, timerEndsAt: endsAt });
+  };
+
   const setActiveCompetitionGroupName = (name: string | null) => {
     setActiveCompetitionGroupNameState(name);
     broadcast({ activeCompetitionGroupName: name });
@@ -1243,12 +1249,6 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
       setCurrentLift("bench");
       setCurrentAttemptIndex(0);
     }
-  };
-
-  const setTimerState = (phase: TimerPhase, endsAt: number | null) => {
-    setTimerPhaseState(phase);
-    setTimerEndsAtState(endsAt);
-    broadcast({ timerPhase: phase, timerEndsAt: endsAt });
   };
 
   const startAttemptClock = () => {
