@@ -3420,8 +3420,8 @@ const GroupManagementPage = () => {
   const [selectedGroupName, setSelectedGroupName] = useState(groups[0]?.name ?? "");
   const [lifterSearchTerm, setLifterSearchTerm] = useState("");
   const [selectedWeightClassFilter, setSelectedWeightClassFilter] = useState("");
-  const [suggestedGroupNames, setSuggestedGroupNames] = useState<string[]>([]);
-  const [checkedSuggestedGroups, setCheckedSuggestedGroups] = useState<Set<string>>(new Set());
+  const [selectedWeightClasses, setSelectedWeightClasses] = useState<Set<string>>(new Set());
+  const [selectedCategories, setSelectedCategories] = useState<Set<string>>(new Set());
 
   const showNotice = (text: string, type: "info" | "success" | "error" = "success") => {
     if (noticeTimerRef.current) window.clearTimeout(noticeTimerRef.current);
@@ -3431,40 +3431,41 @@ const GroupManagementPage = () => {
 
   useEffect(() => () => { if (noticeTimerRef.current) window.clearTimeout(noticeTimerRef.current); }, []);
 
-  const generateSuggestedGroups = () => {
-    const categories = ["SENIOR", "SUB JUNIOR", "JUNIOR", "MASTER"];
-    const weightClasses = Array.from(new Set(lifters.map((l) => l.weightClass).filter(Boolean)));
-    const existingGroupNames = new Set(groups.map((g) => g.name));
+  const categories = ["SENIOR", "SUB JUNIOR", "JUNIOR", "MASTER"];
 
-    const suggested: string[] = [];
-    weightClasses.forEach((wc) => {
-      categories.forEach((cat) => {
+  const createMultipleGroups = () => {
+    if (selectedWeightClasses.size === 0 || selectedCategories.size === 0) {
+      showNotice("Select at least one weight class and one category.", "error");
+      return;
+    }
+
+    const existingGroupNames = new Set(groups.map((g) => g.name));
+    const groupsToCreate: typeof groups = [];
+
+    selectedWeightClasses.forEach((wc) => {
+      selectedCategories.forEach((cat) => {
         const groupName = `${wc} ${cat}`;
         if (!existingGroupNames.has(groupName)) {
-          suggested.push(groupName);
+          groupsToCreate.push({
+            id: `group-${Date.now()}-${Math.random()}`,
+            name: groupName.toUpperCase(),
+            currentLift: "squat" as LiftType,
+          });
         }
       });
     });
 
-    setSuggestedGroupNames(suggested);
-    setCheckedSuggestedGroups(new Set(suggested));
+    if (groupsToCreate.length === 0) {
+      showNotice("All selected combinations already exist.", "error");
+      return;
+    }
+
+    setGroups([...groups, ...groupsToCreate]);
+    setSelectedWeightClasses(new Set());
+    setSelectedCategories(new Set());
+    showNotice(`Created ${groupsToCreate.length} group(s).`);
   };
 
-  const createMultipleGroups = () => {
-    const groupsToCreate = Array.from(checkedSuggestedGroups);
-    if (groupsToCreate.length === 0) { showNotice("Select at least one group to create.", "error"); return; }
-
-    const newGroups = groupsToCreate.map((name) => ({
-      id: `group-${Date.now()}-${Math.random()}`,
-      name: name.toUpperCase(),
-      currentLift: "squat" as LiftType,
-    }));
-
-    setGroups([...groups, ...newGroups]);
-    setSuggestedGroupNames([]);
-    setCheckedSuggestedGroups(new Set());
-    showNotice(`Created ${newGroups.length} group(s).`);
-  };
 
   const filteredGroups = useMemo(() => {
     const query = searchTerm.trim().toUpperCase();
@@ -3720,58 +3721,75 @@ const GroupManagementPage = () => {
             </button>
           </div>
 
-          {suggestedGroupNames.length === 0 && lifters.length > 0 && (
-            <button
-              onClick={generateSuggestedGroups}
-              className="mt-3 w-full rounded-lg border border-cyan-400/30 bg-cyan-400/5 px-3 py-2 text-xs font-medium text-cyan-300 transition-colors hover:bg-cyan-400/10"
-            >
-              Suggest Groups by Weight Class
-            </button>
-          )}
-
-          {suggestedGroupNames.length > 0 && (
+          {lifters.length > 0 && (
             <div className="mt-4 space-y-3">
               <div className="rounded-lg border border-cyan-400/30 bg-cyan-400/5 p-3">
-                <p className="mb-3 text-xs font-semibold text-cyan-300">Suggested Groups by Weight Class</p>
-                <div className="space-y-2">
-                  {suggestedGroupNames.map((name) => (
-                    <label key={name} className="flex items-center gap-2 cursor-pointer">
+                <p className="mb-3 text-xs font-semibold text-cyan-300">Weight Classes</p>
+                <div className="space-y-2 max-h-32 overflow-y-auto">
+                  {availableWeightClasses.map((wc) => (
+                    <label key={wc} className="flex items-center gap-2 cursor-pointer">
                       <input
                         type="checkbox"
-                        checked={checkedSuggestedGroups.has(name)}
+                        checked={selectedWeightClasses.has(wc)}
                         onChange={(e) => {
-                          const updated = new Set(checkedSuggestedGroups);
+                          const updated = new Set(selectedWeightClasses);
                           if (e.target.checked) {
-                            updated.add(name);
+                            updated.add(wc);
                           } else {
-                            updated.delete(name);
+                            updated.delete(wc);
                           }
-                          setCheckedSuggestedGroups(updated);
+                          setSelectedWeightClasses(updated);
                         }}
                         className="h-4 w-4 rounded border-white/30 bg-white/5 accent-cyan-500"
                       />
-                      <span className="text-sm text-slate-300">{name}</span>
+                      <span className="text-sm text-slate-300">{wc}</span>
                     </label>
                   ))}
                 </div>
-                <div className="mt-3 flex gap-2">
-                  <button
-                    onClick={createMultipleGroups}
-                    disabled={checkedSuggestedGroups.size === 0}
-                    className="flex-1 rounded-lg bg-cyan-500 px-3 py-1.5 text-xs font-semibold text-black transition-opacity disabled:cursor-not-allowed disabled:opacity-40 hover:bg-cyan-400"
-                  >
-                    Create {checkedSuggestedGroups.size > 0 ? `(${checkedSuggestedGroups.size})` : ""}
-                  </button>
-                  <button
-                    onClick={() => {
-                      setSuggestedGroupNames([]);
-                      setCheckedSuggestedGroups(new Set());
-                    }}
-                    className="rounded-lg bg-white/10 px-3 py-1.5 text-xs font-medium text-slate-300 transition-colors hover:bg-white/15"
-                  >
-                    Cancel
-                  </button>
+              </div>
+
+              <div className="rounded-lg border border-cyan-400/30 bg-cyan-400/5 p-3">
+                <p className="mb-3 text-xs font-semibold text-cyan-300">Categories</p>
+                <div className="space-y-2">
+                  {categories.map((cat) => (
+                    <label key={cat} className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selectedCategories.has(cat)}
+                        onChange={(e) => {
+                          const updated = new Set(selectedCategories);
+                          if (e.target.checked) {
+                            updated.add(cat);
+                          } else {
+                            updated.delete(cat);
+                          }
+                          setSelectedCategories(updated);
+                        }}
+                        className="h-4 w-4 rounded border-white/30 bg-white/5 accent-cyan-500"
+                      />
+                      <span className="text-sm text-slate-300">{cat}</span>
+                    </label>
+                  ))}
                 </div>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={createMultipleGroups}
+                  disabled={selectedWeightClasses.size === 0 || selectedCategories.size === 0}
+                  className="flex-1 rounded-lg bg-cyan-500 px-3 py-1.5 text-xs font-semibold text-black transition-opacity disabled:cursor-not-allowed disabled:opacity-40 hover:bg-cyan-400"
+                >
+                  Create ({selectedWeightClasses.size * selectedCategories.size})
+                </button>
+                <button
+                  onClick={() => {
+                    setSelectedWeightClasses(new Set());
+                    setSelectedCategories(new Set());
+                  }}
+                  className="rounded-lg bg-white/10 px-3 py-1.5 text-xs font-medium text-slate-300 transition-colors hover:bg-white/15"
+                >
+                  Clear
+                </button>
               </div>
             </div>
           )}
