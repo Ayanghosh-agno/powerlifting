@@ -4295,7 +4295,7 @@ const RefereePage = () => {
     }
   }, [searchParams, activeCompetitionId, competitions, switchCompetition]);
 
-  const [qrModal, setQrModal] = useState<{ slot: RefereeSlot; title: string; url: string } | null>(null);
+  const [qrModal, setQrModal] = useState<{ slot: RefereeSlot; title: string; url: string; sessionId: string } | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
   const [sessionAction, setSessionAction] = useState<{ type: 'pending' | 'success'; action: 'create' | 'refresh' } | null>(null);
   const [activeSession, setActiveSession] = useState<{ id: string; expires_at: string } | null>(null);
@@ -4357,12 +4357,13 @@ const RefereePage = () => {
     return { url, seedValue: "" };
   };
 
-  const openRefereeScreen = (slot: RefereeSlot) => {
-    const { url, seedValue } = buildRefereeLink(slot);
+  const openRefereeScreen = (slot: RefereeSlot, sessionId?: string) => {
+    const { url, seedValue } = buildRefereeLink(slot, sessionId);
     const popup = window.open(url, "_blank", "width=900,height=700");
     if (!popup) {
       const fallbackParams = new URLSearchParams();
       if (activeCompetitionId) fallbackParams.set("cid", activeCompetitionId);
+      if (sessionId) fallbackParams.set("session", sessionId);
       if (seedValue) fallbackParams.set("seed", seedValue);
       navigate(`/signals/${slot}${fallbackParams.toString() ? `?${fallbackParams.toString()}` : ""}`);
       return;
@@ -4387,7 +4388,7 @@ const RefereePage = () => {
       if (!activeCompetitionId) return;
       const session = await dbRefereeSessions.create(activeCompetitionId);
       const { url } = buildRefereeLink(slot, session.id);
-      setQrModal({ slot, title, url });
+      setQrModal({ slot, title, url, sessionId: session.id });
       setActiveSession(session);
     } catch (error) {
       console.error("Failed to create referee session:", error);
@@ -4706,7 +4707,7 @@ const RefereePage = () => {
             <div className="flex flex-col gap-3">
               <motion.button
                 type="button"
-                onClick={() => openRefereeScreen(qrModal.slot)}
+                onClick={() => openRefereeScreen(qrModal.slot, qrModal.sessionId)}
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
                 className="rounded-xl bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-400 hover:to-cyan-500 py-3 text-sm font-semibold text-black transition-all duration-200"
