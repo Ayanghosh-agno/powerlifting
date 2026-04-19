@@ -4297,6 +4297,7 @@ const RefereePage = () => {
 
   const [qrModal, setQrModal] = useState<{ slot: RefereeSlot; title: string; url: string } | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
+  const [sessionAction, setSessionAction] = useState<{ type: 'pending' | 'success'; action: 'create' | 'refresh' } | null>(null);
 
   useEffect(() => {
     if (!qrModal) return;
@@ -4385,34 +4386,99 @@ const RefereePage = () => {
 
       <div className="mb-6 rounded-2xl border border-white/15 bg-white/5 p-6">
         <h3 className="mb-4 font-semibold text-white">Session Management</h3>
+        {sessionAction && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className={`mb-3 flex items-center gap-2 rounded-lg p-3 ${
+              sessionAction.type === 'pending'
+                ? 'bg-blue-500/20 text-blue-300 border border-blue-400/30'
+                : 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/30'
+            }`}
+          >
+            {sessionAction.type === 'pending' ? (
+              <>
+                <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                <span className="text-sm font-medium">
+                  {sessionAction.action === 'create' ? 'Creating session...' : 'Refreshing sessions...'}
+                </span>
+              </>
+            ) : (
+              <>
+                <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                </svg>
+                <span className="text-sm font-medium">
+                  {sessionAction.action === 'create' ? 'Session created!' : 'Sessions cleared!'}
+                </span>
+              </>
+            )}
+          </motion.div>
+        )}
         <div className="space-y-3">
           <button
             onClick={async () => {
+              if (sessionAction?.type === 'pending') return;
+              setSessionAction({ type: 'pending', action: 'create' });
               try {
                 const session = await dbRefereeSessions.create(activeCompetitionId || "");
                 const link = `${window.location.origin}/#/signals/left?session=${session.id}&cid=${encodeURIComponent(activeCompetitionId || "")}`;
                 console.log("New session created:", session.id);
                 await navigator.clipboard.writeText(link);
+                setSessionAction({ type: 'success', action: 'create' });
+                setTimeout(() => setSessionAction(null), 2500);
               } catch (error) {
                 console.error("Failed to create session:", error);
+                setSessionAction(null);
               }
             }}
-            className="w-full rounded-xl bg-cyan-500 px-4 py-2 font-semibold text-black hover:bg-cyan-400 transition"
+            disabled={sessionAction?.type === 'pending'}
+            className="w-full rounded-xl bg-cyan-500 px-4 py-2 font-semibold text-black hover:bg-cyan-400 disabled:opacity-70 disabled:cursor-not-allowed transition flex items-center justify-center gap-2"
           >
-            Create New Session
+            {sessionAction?.type === 'pending' && sessionAction.action === 'create' ? (
+              <>
+                <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                Creating...
+              </>
+            ) : (
+              'Create New Session'
+            )}
           </button>
           <button
             onClick={async () => {
+              if (sessionAction?.type === 'pending') return;
+              setSessionAction({ type: 'pending', action: 'refresh' });
               try {
                 await dbRefereeSessions.invalidateAll(activeCompetitionId || "");
                 resetSignals();
+                setSessionAction({ type: 'success', action: 'refresh' });
+                setTimeout(() => setSessionAction(null), 2500);
               } catch (error) {
                 console.error("Failed to refresh session:", error);
+                setSessionAction(null);
               }
             }}
-            className="w-full rounded-xl border border-white/20 bg-white/5 px-4 py-2 font-semibold text-white hover:bg-white/10 transition"
+            disabled={sessionAction?.type === 'pending'}
+            className="w-full rounded-xl border border-white/20 bg-white/5 px-4 py-2 font-semibold text-white hover:bg-white/10 disabled:opacity-70 disabled:cursor-not-allowed transition flex items-center justify-center gap-2"
           >
-            Refresh Session (Invalidate All)
+            {sessionAction?.type === 'pending' && sessionAction.action === 'refresh' ? (
+              <>
+                <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                Refreshing...
+              </>
+            ) : (
+              'Refresh Session (Invalidate All)'
+            )}
           </button>
         </div>
       </div>
@@ -4673,6 +4739,8 @@ const RefereeStationPage = () => {
       ? "text-red-400"
       : "text-slate-400";
 
+  const progressPercentage = decisionEndsAt ? ((REFEREE_CONFIRM_DELAY_MS - (decisionEndsAt - now)) / REFEREE_CONFIRM_DELAY_MS) * 100 : 0;
+
   return (
     <div className="flex min-h-screen flex-col bg-[#05070f] text-white select-none">
       <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
@@ -4680,49 +4748,111 @@ const RefereeStationPage = () => {
           <p className="text-xs uppercase tracking-widest text-slate-500">Referee Station</p>
           <p className="text-lg font-bold text-white">{config.label}</p>
         </div>
-        <div className="flex items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-300">
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+        <motion.div
+          initial={{ opacity: 0.8 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.5, repeat: Infinity, repeatType: "reverse" }}
+          className="flex items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-300"
+        >
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
           Connected
-        </div>
+        </motion.div>
       </div>
 
       <div className="flex flex-1 flex-col items-center justify-center gap-6 px-6 py-8">
         {pendingDecision ? (
-          <div className="text-center">
+          <motion.div
+            initial={{ scale: 0.8, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="text-center"
+          >
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-amber-300">
               Hold {pendingDecision}…
             </p>
-            <p className="mt-1 text-3xl font-bold tabular-nums text-amber-200">{countdown.toFixed(1)}s</p>
-          </div>
+            <motion.p
+              key={Math.floor(countdown * 10)}
+              initial={{ scale: 1.3, opacity: 0.5 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ duration: 0.15 }}
+              className="mt-1 text-3xl font-bold tabular-nums text-amber-200"
+            >
+              {countdown.toFixed(1)}s
+            </motion.p>
+          </motion.div>
         ) : (
-          <div className="text-center">
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.3 }}
+            className="text-center"
+          >
             <p className="text-xs uppercase tracking-widest text-slate-500">Current</p>
-            <p className={`mt-1 text-2xl font-bold ${signalColor}`}>{currentSignal ?? "PENDING"}</p>
-          </div>
+            <AnimatePresence mode="wait">
+              <motion.p
+                key={currentSignal}
+                initial={{ y: 10, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                exit={{ y: -10, opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className={`mt-1 text-2xl font-bold ${signalColor}`}
+              >
+                {currentSignal ?? "PENDING"}
+              </motion.p>
+            </AnimatePresence>
+          </motion.div>
         )}
 
         <div className="grid w-full max-w-sm gap-4">
-          <button
-            onPointerDown={(event) => startDecisionHold("GOOD", event)}
-            onPointerUp={cancelPendingDecision}
-            onPointerLeave={cancelPendingDecision}
-            onPointerCancel={cancelPendingDecision}
-            className="h-28 touch-manipulation rounded-2xl bg-emerald-500 text-2xl font-extrabold text-black shadow-lg shadow-emerald-500/20 active:scale-95 transition-transform"
-          >
-            GOOD LIFT
-          </button>
-          <button
-            onPointerDown={(event) => startDecisionHold("NO", event)}
-            onPointerUp={cancelPendingDecision}
-            onPointerLeave={cancelPendingDecision}
-            onPointerCancel={cancelPendingDecision}
-            className="h-28 touch-manipulation rounded-2xl bg-red-500 text-2xl font-extrabold text-white shadow-lg shadow-red-500/20 active:scale-95 transition-transform"
-          >
-            NO LIFT
-          </button>
+          <div className="relative">
+            <button
+              onPointerDown={(event) => startDecisionHold("GOOD", event)}
+              onPointerUp={cancelPendingDecision}
+              onPointerLeave={cancelPendingDecision}
+              onPointerCancel={cancelPendingDecision}
+              className="h-28 w-full touch-manipulation rounded-2xl bg-emerald-500 text-2xl font-extrabold text-black shadow-lg shadow-emerald-500/20 active:scale-95 transition-transform overflow-hidden relative"
+            >
+              {pendingDecision === "GOOD" && (
+                <motion.div
+                  className="absolute inset-0 bg-emerald-600 rounded-2xl"
+                  initial={{ scaleX: 0 }}
+                  animate={{ scaleX: progressPercentage / 100 }}
+                  transition={{ duration: 0.05 }}
+                  style={{ transformOrigin: "left" }}
+                />
+              )}
+              <span className="relative z-10">GOOD LIFT</span>
+            </button>
+          </div>
+          <div className="relative">
+            <button
+              onPointerDown={(event) => startDecisionHold("NO", event)}
+              onPointerUp={cancelPendingDecision}
+              onPointerLeave={cancelPendingDecision}
+              onPointerCancel={cancelPendingDecision}
+              className="h-28 w-full touch-manipulation rounded-2xl bg-red-500 text-2xl font-extrabold text-white shadow-lg shadow-red-500/20 active:scale-95 transition-transform overflow-hidden relative"
+            >
+              {pendingDecision === "NO" && (
+                <motion.div
+                  className="absolute inset-0 bg-red-600 rounded-2xl"
+                  initial={{ scaleX: 0 }}
+                  animate={{ scaleX: progressPercentage / 100 }}
+                  transition={{ duration: 0.05 }}
+                  style={{ transformOrigin: "left" }}
+                />
+              )}
+              <span className="relative z-10">NO LIFT</span>
+            </button>
+          </div>
         </div>
 
-        <p className="text-center text-xs text-slate-600">Hold button to confirm your decision</p>
+        <motion.p
+          initial={{ opacity: 0.5 }}
+          animate={{ opacity: pendingDecision ? 0 : 1 }}
+          transition={{ duration: 0.2 }}
+          className="text-center text-xs text-slate-600"
+        >
+          Hold button to confirm your decision
+        </motion.p>
       </div>
     </div>
   );
