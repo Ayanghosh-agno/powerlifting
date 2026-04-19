@@ -327,23 +327,24 @@ export function useSupabaseSync(
   useEffect(() => {
     if (!activeCompetitionId) return;
 
-    const channel = supabase
-      .channel(`referee-presence-${activeCompetitionId}`)
-      .on("presence", { event: "sync" }, () => {
-        const state = channel.presenceState<{ position: number }>();
-        const slots: ConnectedRefereeSlots = { left: false, center: false, right: false };
-        for (const presences of Object.values(state)) {
-          for (const p of presences) {
-            const slot = POSITION_TO_SLOT[p.position];
-            if (slot) slots[slot] = true;
-          }
-        }
-        onDevicesChanged(slots);
-      })
-      .subscribe();
+    const slots: ConnectedRefereeSlots = { left: false, center: false, right: false };
+
+    const channels = [0, 1, 2].map((index) => {
+      const ch = supabase
+        .channel(`referee-station-${activeCompetitionId}-${index}`)
+        .on("presence", { event: "sync" }, () => {
+          const state = ch.presenceState<{ position: number }>();
+          const connected = Object.values(state).flat().some((p) => p.position === index);
+          const slotName = POSITION_TO_SLOT[index];
+          slots[slotName] = connected;
+          onDevicesChanged({ ...slots });
+        })
+        .subscribe();
+      return ch;
+    });
 
     return () => {
-      supabase.removeChannel(channel);
+      channels.forEach((ch) => supabase.removeChannel(ch));
     };
   }, [activeCompetitionId, onDevicesChanged]);
 

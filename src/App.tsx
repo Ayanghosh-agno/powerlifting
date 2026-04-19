@@ -4290,7 +4290,8 @@ const RefereeStationPage = () => {
     if (!config || !activeCompetitionId) return;
 
     const channel = supabase
-      .channel(`referee-presence-${activeCompetitionId}`)
+      .channel(`referee-station-${activeCompetitionId}-${config.index}`)
+      .on("presence", { event: "sync" }, () => {})
       .subscribe(async (status) => {
         if (status === "SUBSCRIBED") {
           await channel.track({ position: config.index });
