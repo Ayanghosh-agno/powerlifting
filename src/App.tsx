@@ -776,6 +776,42 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     isDisplayScreen
   );
 
+  const publishRemotePatch = useCallback((patch: Partial<AppContextValue>) => {
+    if (isDisplayScreen || !activeCompetitionId) return;
+    const topic = toRelayTopic(activeCompetitionId);
+    if (!topic) return;
+
+    const relayPayload = {
+      senderId: relayClientIdRef.current,
+      competitionId: activeCompetitionId,
+      patch,
+      ts: Date.now(),
+    };
+    fetch(`${REMOTE_RELAY_BASE}/${topic}`, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=UTF-8" },
+      body: JSON.stringify(relayPayload),
+      keepalive: true,
+    }).catch(() => null);
+  }, [isDisplayScreen, activeCompetitionId]);
+
+  const broadcast = useCallback((next: Partial<AppContextValue>) => {
+    if (isDisplayScreen) return;
+    socket.emit("SYNC_STATE", next);
+    publishRemotePatch(next);
+  }, [isDisplayScreen, publishRemotePatch]);
+
+  const setTimerState = useCallback((phase: TimerPhase, endsAt: number | null) => {
+    setTimerPhaseState(phase);
+    setTimerEndsAtState(endsAt);
+    broadcast({ timerPhase: phase, timerEndsAt: endsAt });
+  }, [broadcast]);
+
+  const setActiveCompetitionGroupName = useCallback((name: string | null) => {
+    setActiveCompetitionGroupNameState(name);
+    broadcast({ activeCompetitionGroupName: name });
+  }, [broadcast]);
+
   const hydrateCompetition = (competition: CompetitionRecord | null) => {
     if (!competition) {
       const empty = createEmptyCompetitionState();
@@ -1065,42 +1101,6 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
       source.close();
     };
   }, [activeCompetitionId, applyIncomingState]);
-
-  const publishRemotePatch = useCallback((patch: Partial<AppContextValue>) => {
-    if (isDisplayScreen || !activeCompetitionId) return;
-    const topic = toRelayTopic(activeCompetitionId);
-    if (!topic) return;
-
-    const relayPayload = {
-      senderId: relayClientIdRef.current,
-      competitionId: activeCompetitionId,
-      patch,
-      ts: Date.now(),
-    };
-    fetch(`${REMOTE_RELAY_BASE}/${topic}`, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain;charset=UTF-8" },
-      body: JSON.stringify(relayPayload),
-      keepalive: true,
-    }).catch(() => null);
-  }, [isDisplayScreen, activeCompetitionId]);
-
-  const broadcast = useCallback((next: Partial<AppContextValue>) => {
-    if (isDisplayScreen) return;
-    socket.emit("SYNC_STATE", next);
-    publishRemotePatch(next);
-  }, [isDisplayScreen, publishRemotePatch]);
-
-  const setTimerState = useCallback((phase: TimerPhase, endsAt: number | null) => {
-    setTimerPhaseState(phase);
-    setTimerEndsAtState(endsAt);
-    broadcast({ timerPhase: phase, timerEndsAt: endsAt });
-  }, [broadcast]);
-
-  const setActiveCompetitionGroupName = useCallback((name: string | null) => {
-    setActiveCompetitionGroupNameState(name);
-    broadcast({ activeCompetitionGroupName: name });
-  }, [broadcast]);
 
   const setNextAttemptQueue = useCallback((queue: NextAttemptEntry[]) => {
     setNextAttemptQueueState(queue);
