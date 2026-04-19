@@ -3931,32 +3931,11 @@ const GroupManagementPage = () => {
       </div>
 
       <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
-        <div className="mb-4 flex flex-wrap items-center gap-3">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-widest text-cyan-400">Lifters</p>
-            <p className="mt-0.5 text-xs text-slate-500">
-              {activeGroupFilter ? `Showing Group ${activeGroupFilter}` : "Showing all lifters"} — {visibleLifters.length} total
-            </p>
-          </div>
-          {groups.length > 0 && (
-            <div className="ml-auto flex flex-wrap gap-2">
-              <button
-                onClick={() => setActiveGroupFilter("")}
-                className={`rounded-lg px-3 py-1.5 text-xs transition-colors ${!activeGroupFilter ? "bg-cyan-500/20 text-cyan-300" : "bg-white/8 text-slate-400 hover:bg-white/12"}`}
-              >
-                All
-              </button>
-              {groups.map((g) => (
-                <button
-                  key={g.id}
-                  onClick={() => setActiveGroupFilter(activeGroupFilter === g.name ? "" : g.name)}
-                  className={`rounded-lg px-3 py-1.5 text-xs transition-colors ${activeGroupFilter === g.name ? "bg-cyan-500/20 text-cyan-300" : "bg-white/8 text-slate-400 hover:bg-white/12"}`}
-                >
-                  Group {g.name}
-                </button>
-              ))}
-            </div>
-          )}
+        <div className="mb-4">
+          <p className="text-xs font-semibold uppercase tracking-widest text-cyan-400">Lifters</p>
+          <p className="mt-0.5 mb-4 text-xs text-slate-500">
+            {activeGroupFilter ? `Showing Group ${activeGroupFilter}` : "Showing all lifters"} — {visibleLifters.length} total
+          </p>
         </div>
 
         <div className="mb-4 flex flex-wrap items-center gap-3">
@@ -3967,6 +3946,20 @@ const GroupManagementPage = () => {
               onChange={(e) => setLifterSearchTerm(e.target.value)}
             />
           </div>
+          {groups.length > 0 && (
+            <select
+              value={activeGroupFilter}
+              onChange={(e) => setActiveGroupFilter(e.target.value)}
+              className="h-10 rounded-xl border border-white/15 bg-black/40 px-3 text-sm text-white focus:border-cyan-400/60 focus:outline-none"
+            >
+              <option value="">All Groups</option>
+              {groups.map((g) => (
+                <option key={g.id} value={g.name} className="bg-slate-900">
+                  Group {g.name}
+                </option>
+              ))}
+            </select>
+          )}
           {availableWeightClasses.length > 0 && (
             <select
               value={selectedWeightClassFilter}
