@@ -5264,11 +5264,13 @@ const DisplayFullPage = () => {
       const groupNameLower = groupName.toLowerCase();
       const members = ranking.filter((l) => {
         if (l.group === groupName) return true;
-        if (l.group !== groupName && isDualCategory(l.category)) {
-          const [, secondPart] = getDualCategoryParts(l.category);
-          const keywords = secondPart.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
-          const matchesSecond = keywords.some((kw) => groupNameLower.includes(kw));
-          if (matchesSecond) return true;
+        if (isDualCategory(l.category)) {
+          const [firstPart, secondPart] = getDualCategoryParts(l.category);
+          const firstKeywords = firstPart.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
+          const secondKeywords = secondPart.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
+          const matchesFirst = firstKeywords.some((kw) => groupNameLower.includes(kw));
+          const matchesSecond = secondKeywords.some((kw) => groupNameLower.includes(kw));
+          if (matchesFirst || matchesSecond) return true;
         }
         return false;
       });
