@@ -406,7 +406,7 @@ const getCategoryOptions = (sex: "Male" | "Female") => {
     `Master 4 ${suffix}`,
     `Sub Junior ${suffix} + Junior ${suffix}`,
     `Junior ${suffix} + Senior ${suffix}`,
-    `Senior ${suffix} + Master ${suffix}`,
+    `Senior ${suffix} + Master 1 ${suffix}`,
   ];
 };
 
@@ -415,7 +415,7 @@ const getDoubleCategoryOptions = (sex: "Male" | "Female") => {
   return [
     `Sub Junior ${suffix} + Junior ${suffix}`,
     `Junior ${suffix} + Senior ${suffix}`,
-    `Senior ${suffix} + Master ${suffix}`,
+    `Senior ${suffix} + Master 1 ${suffix}`,
   ];
 };
 
