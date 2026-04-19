@@ -3432,9 +3432,20 @@ const GroupManagementPage = () => {
   useEffect(() => () => { if (noticeTimerRef.current) window.clearTimeout(noticeTimerRef.current); }, []);
 
   const generateSuggestedGroups = () => {
+    const categories = ["SENIOR", "SUB JUNIOR", "JUNIOR", "MASTER"];
     const weightClasses = Array.from(new Set(lifters.map((l) => l.weightClass).filter(Boolean)));
     const existingGroupNames = new Set(groups.map((g) => g.name));
-    const suggested = weightClasses.filter((wc) => !existingGroupNames.has(wc));
+
+    const suggested: string[] = [];
+    weightClasses.forEach((wc) => {
+      categories.forEach((cat) => {
+        const groupName = `${wc} ${cat}`;
+        if (!existingGroupNames.has(groupName)) {
+          suggested.push(groupName);
+        }
+      });
+    });
+
     setSuggestedGroupNames(suggested);
     setCheckedSuggestedGroups(new Set(suggested));
   };
