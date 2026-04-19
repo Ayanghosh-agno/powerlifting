@@ -1484,7 +1484,13 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     } else {
       clearTimerState();
     }
-    resetSignals();
+    if (overlayHideTimeoutRef.current) {
+      window.clearTimeout(overlayHideTimeoutRef.current);
+    }
+    overlayHideTimeoutRef.current = window.setTimeout(() => {
+      resetSignals();
+      overlayHideTimeoutRef.current = null;
+    }, RESULT_OVERLAY_DISPLAY_MS + 500);
   };
 
   return (
@@ -5414,6 +5420,7 @@ const DisplayFullPage = () => {
   const [overlayPhase, setOverlayPhase] = useState<"circles" | "lift" | null>(null);
   const [displayTheme, setDisplayTheme] = useState<DisplayThemeKey>("black");
   const prevSignalsRef = useRef<string>("");
+  const overlayHideTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const cycleDisplayTheme = () => {
     setDisplayTheme((prev) => {
@@ -5482,6 +5489,14 @@ const DisplayFullPage = () => {
     }
     return undefined;
   }, [refereeSignals]);
+
+  useEffect(() => {
+    return () => {
+      if (overlayHideTimeoutRef.current) {
+        window.clearTimeout(overlayHideTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const ranking = useMemo(
     () =>
