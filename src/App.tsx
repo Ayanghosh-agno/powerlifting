@@ -3771,7 +3771,7 @@ const GroupManagementPage = () => {
                 const count = lifters.filter((l) => isInGroup(l.group, g.name)).length;
                 return (
                   <div key={g.id} className="flex items-center justify-between rounded-lg bg-white/5 px-3 py-2">
-                    <span className="text-sm font-medium text-white">Group {g.name}</span>
+                    <span className="text-sm font-medium text-white">{g.name}</span>
                     <span className="text-xs text-slate-400">{count} lifter{count !== 1 ? "s" : ""}</span>
                   </div>
                 );
