@@ -281,20 +281,19 @@ export const dbRefereeSessions = {
     return data;
   },
 
-  async getActiveForCompetition(competitionId: string): Promise<DbRefereeSession | null> {
+  async getActiveForCompetition(competitionId: string): Promise<DbRefereeSession[]> {
     const { data, error } = await supabase
       .from("referee_sessions")
       .select("*")
       .eq("competition_id", competitionId)
       .eq("is_active", true)
       .gt("expires_at", new Date().toISOString())
-      .order("created_at", { ascending: false })
-      .maybeSingle();
+      .order("created_at", { ascending: false });
     if (error) throw error;
-    return data ?? null;
+    return data ?? [];
   },
 
-  async deleteAll(competitionId: string): Promise<void> {
+  async invalidateAll(competitionId: string): Promise<void> {
     const { error } = await supabase
       .from("referee_sessions")
       .delete()

@@ -31,8 +31,8 @@ export function SessionManager({
   const loadSessions = async () => {
     try {
       const sessions = await dbRefereeSessions.getActiveForCompetition(competitionId);
-      setActiveSessions(sessions);
-      if (sessions.length > 0) {
+      setActiveSessions(Array.isArray(sessions) ? sessions : []);
+      if (Array.isArray(sessions) && sessions.length > 0) {
         setCurrentSessionId(sessions[0].id);
       }
     } catch (error) {
