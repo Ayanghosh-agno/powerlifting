@@ -5474,28 +5474,37 @@ const DisplayFullPage = () => {
     if (signalsStr === prevSignalsRef.current) return;
     prevSignalsRef.current = signalsStr;
 
-    if (refereeSignals.every((signal) => signal !== null)) {
+    const hasAnySignal = refereeSignals.some((signal) => signal !== null);
+    const allSignalsReceived = refereeSignals.every((signal) => signal !== null);
+
+    if (hasAnySignal) {
       setDisplaySignals(refereeSignals);
-      const allGood = refereeSignals.every((s) => s === "GOOD");
 
-      if (overlayPhaseTimeoutRef.current) window.clearTimeout(overlayPhaseTimeoutRef.current);
-      if (overlayHideTimeoutRef.current) window.clearTimeout(overlayHideTimeoutRef.current);
-
-      if (allGood) {
-        setOverlayPhase("circles");
-        overlayPhaseTimeoutRef.current = window.setTimeout(() => setOverlayPhase("lift"), 2000);
-        overlayHideTimeoutRef.current = window.setTimeout(() => {
-          setOverlayPhase(null);
-          setDisplaySignals([null, null, null]);
-          clearSignals();
-        }, RESULT_OVERLAY_DISPLAY_MS);
-      } else {
+      if (!allSignalsReceived) {
         setShowSignalOverlay(true);
-        overlayHideTimeoutRef.current = window.setTimeout(() => {
-          setShowSignalOverlay(false);
-          setDisplaySignals([null, null, null]);
-          clearSignals();
-        }, RESULT_OVERLAY_DISPLAY_MS);
+      } else {
+        const allGood = refereeSignals.every((s) => s === "GOOD");
+
+        if (overlayPhaseTimeoutRef.current) window.clearTimeout(overlayPhaseTimeoutRef.current);
+        if (overlayHideTimeoutRef.current) window.clearTimeout(overlayHideTimeoutRef.current);
+
+        if (allGood) {
+          setOverlayPhase("circles");
+          overlayPhaseTimeoutRef.current = window.setTimeout(() => setOverlayPhase("lift"), 2000);
+          overlayHideTimeoutRef.current = window.setTimeout(() => {
+            setOverlayPhase(null);
+            setDisplaySignals([null, null, null]);
+            clearSignals();
+          }, RESULT_OVERLAY_DISPLAY_MS);
+        } else {
+          setOverlayPhase("no-lift");
+          overlayHideTimeoutRef.current = window.setTimeout(() => {
+            setOverlayPhase(null);
+            setShowSignalOverlay(false);
+            setDisplaySignals([null, null, null]);
+            clearSignals();
+          }, RESULT_OVERLAY_DISPLAY_MS);
+        }
       }
     }
     return undefined;
@@ -5885,7 +5894,7 @@ const DisplayFullPage = () => {
         )}
 
         {/* ── NO lift overlay — full-screen colored circles ── */}
-        {showSignalOverlay && (
+        {overlayPhase === "no-lift" && (
           <div className="pointer-events-none fixed inset-0 z-50 flex flex-col items-center justify-center bg-black">
             <motion.p
               initial={{ opacity: 0, y: -20 }}
@@ -5967,23 +5976,32 @@ const DisplayFullPage = () => {
       </div>
 
       {showSignalOverlay && (
-        <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-black/20">
+        <div className="pointer-events-none fixed inset-0 z-50 flex flex-col items-center justify-center bg-black">
           <motion.div
-            initial={{ opacity: 0, y: 14 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="rounded-2xl border border-white/30 bg-black/80 p-6"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="flex gap-6 md:gap-12 lg:gap-20"
           >
-            <p className="mb-4 text-center text-lg font-semibold text-white">Referee Signal</p>
-            <div className="flex gap-5">
-              {displaySignals.map((signal, idx) => (
-                <div
-                  key={idx}
-                  className={`h-24 w-24 rounded-full ${
-                    signal === "NO" ? "bg-red-500 shadow-[0_0_30px_rgba(239,68,68,0.9)]" : "bg-emerald-400 shadow-[0_0_30px_rgba(16,185,129,0.85)]"
-                  }`}
-                />
-              ))}
-            </div>
+            {displaySignals.map((signal, idx) => (
+              <motion.div
+                key={idx}
+                initial={{ scale: 0, opacity: 0 }}
+                animate={{
+                  scale: 1,
+                  opacity: signal !== null ? 1 : 0.3,
+                }}
+                transition={{
+                  type: "spring",
+                  stiffness: 220,
+                  damping: 14,
+                }}
+                className={`h-32 w-32 rounded-full md:h-48 md:w-48 lg:h-64 lg:w-64 ${
+                  signal !== null
+                    ? "bg-blue-500 shadow-[0_0_60px_rgba(59,130,246,0.95)]"
+                    : "border-2 border-blue-500/30 shadow-[0_0_40px_rgba(59,130,246,0.3)]"
+                }`}
+              />
+            ))}
           </motion.div>
         </div>
       )}
