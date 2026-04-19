@@ -15,37 +15,22 @@ import {
 import { QRCodeSVG } from "qrcode.react";
 import indiaStateDistrictData from "../node_modules/india-states-districts/state_discripts.json";
 import { useSupabaseSync, type ConnectedRefereeSlots } from "./lib/useSupabaseSync";
-type LiftType = "squat" | "bench" | "deadlift";
-type AttemptStatus = "PENDING" | "GOOD" | "NO" | "UNATTEMPTED";
-type TimerPhase = "IDLE" | "ATTEMPT" | "NEXT_ATTEMPT";
-type CompetitionMode = "FULL_GAME" | "BENCH_ONLY";
-type Attempt = { weight: number | ""; status: AttemptStatus };
-type RefSignal = "GOOD" | "NO" | null;
-type RefereeSlot = "left" | "center" | "right";
-type DisplayThemeKey = "black" | "white" | "royal" | "emerald" | "sepia" | "crimson" | "graphite";
-type Group = { id: string; name: string; currentLift: LiftType };
-type NextAttemptEntry = { lifterId: string; lift: LiftType; attemptIndex: number };
-
-type Lifter = {
-  id: string;
-  name: string;
-  sex: "Male" | "Female";
-  dob: string;
-  bodyweight: number | "";
-  weightClass: string;
-  manualWeightClass: string;
-  isEquipped: boolean;
-  disqualified: boolean;
-  category: string;
-  group: string | string[];
-  team: string;
-  rackHeightSquat: number | "";
-  rackHeightBench: number | "";
-  lot: number | "";
-  squatAttempts: Attempt[];
-  benchAttempts: Attempt[];
-  deadliftAttempts: Attempt[];
-};
+import {
+  type LiftType,
+  type AttemptStatus,
+  type TimerPhase,
+  type CompetitionMode,
+  type Attempt,
+  type RefSignal,
+  type RefereeSlot,
+  type DisplayThemeKey,
+  type Group,
+  type NextAttemptEntry,
+  type Lifter,
+  type CompetitionRecord,
+  type PersistedState,
+} from "./lib/types";
+import { initializeStateManager } from "./lib/stateManager";
 
 type AppContextValue = {
   competitions: CompetitionRecord[];
@@ -101,29 +86,6 @@ type AppContextValue = {
   untrackRefereePresence: () => void;
 };
 
-type PersistedState = {
-  lifters: Lifter[];
-  groups: Group[];
-  currentLifterId: string | null;
-  refereeSignals: RefSignal[];
-  refereeInputLocked: boolean;
-  currentLift: LiftType;
-  currentAttemptIndex: number;
-  competitionStarted: boolean;
-  includeCollars: boolean;
-  timerPhase: TimerPhase;
-  timerEndsAt: number | null;
-  competitionMode: CompetitionMode;
-  /** null = full meet; non-null = only this group's lifters in control / flight order */
-  activeCompetitionGroupName: string | null;
-  nextAttemptQueue: NextAttemptEntry[];
-};
-
-type CompetitionRecord = PersistedState & {
-  id: string;
-  name: string;
-  createdAt: number;
-};
 
 type StoredState = {
   competitions?: Partial<CompetitionRecord>[];
@@ -767,22 +729,21 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     if (normalized.length > 0) {
       const first = normalized[0];
       setActiveCompetitionIdState(first.id);
-      setLiftersState(first.lifters);
-      setGroupsState(first.groups);
-      setCurrentLifterIdState(first.currentLifterId ?? first.lifters[0]?.id ?? null);
+      setLifters(first.lifters);
+      setGroups(first.groups);
+      setCurrentLifterId(first.currentLifterId ?? first.lifters[0]?.id ?? null);
       setRefereeSignals(first.refereeSignals);
-      setRefereeInputLockedState(first.refereeInputLocked);
-      setCurrentLiftState(first.currentLift);
-      setCurrentAttemptIndexState(first.currentAttemptIndex);
-      setCompetitionStartedState(first.competitionStarted);
-      setIncludeCollarsState(first.includeCollars);
-      setTimerPhaseState(first.timerPhase);
-      setTimerEndsAtState(first.timerEndsAt);
-      setCompetitionModeState(first.competitionMode);
-      setNextAttemptQueueState(first.nextAttemptQueue);
-      setActiveCompetitionGroupNameState(first.activeCompetitionGroupName ?? null);
+      setRefereeInputLocked(first.refereeInputLocked);
+      setCurrentLift(first.currentLift);
+      setCurrentAttemptIndex(first.currentAttemptIndex);
+      setCompetitionStarted(first.competitionStarted);
+      setIncludeCollars(first.includeCollars);
+      setTimerState(first.timerPhase, first.timerEndsAt);
+      setCompetitionMode(first.competitionMode);
+      setNextAttemptQueue(first.nextAttemptQueue);
+      setActiveCompetitionGroupName(first.activeCompetitionGroupName ?? null);
     }
-  }, []);
+  }, [setLifters, setGroups, setCurrentLifterId, setRefereeSignals, setRefereeInputLocked, setCurrentLift, setCurrentAttemptIndex, setCompetitionStarted, setIncludeCollars, setTimerState, setCompetitionMode, setNextAttemptQueue, setActiveCompetitionGroupName]);
 
   const onRefereeSignalsChanged = useCallback((signals: RefSignal[]) => {
     setRefereeSignals(signals);
@@ -826,8 +787,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
       setCurrentAttemptIndexState(empty.currentAttemptIndex);
       setCompetitionStartedState(empty.competitionStarted);
       setIncludeCollarsState(empty.includeCollars);
-      setTimerPhaseState(empty.timerPhase);
-      setTimerEndsAtState(empty.timerEndsAt);
+      setTimerState(empty.timerPhase, empty.timerEndsAt);
       setCompetitionModeState(empty.competitionMode);
       setNextAttemptQueueState(empty.nextAttemptQueue);
       setActiveCompetitionGroupNameState(empty.activeCompetitionGroupName);
@@ -837,14 +797,13 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     setLiftersState(competition.lifters);
     setGroupsState(competition.groups);
     setCurrentLifterIdState(competition.currentLifterId ?? competition.lifters[0]?.id ?? null);
-    setRefereeSignalsState([null, null, null]);
+    setRefereeSignals([null, null, null]);
     setRefereeInputLockedState(competition.refereeInputLocked);
     setCurrentLiftState(competition.currentLift);
     setCurrentAttemptIndexState(competition.currentAttemptIndex);
     setCompetitionStartedState(competition.competitionStarted);
     setIncludeCollarsState(competition.includeCollars);
-    setTimerPhaseState(competition.timerPhase);
-    setTimerEndsAtState(competition.timerEndsAt);
+    setTimerState(competition.timerPhase, competition.timerEndsAt);
     setCompetitionModeState(competition.competitionMode);
     setNextAttemptQueueState(competition.nextAttemptQueue);
     setActiveCompetitionGroupNameState(competition.activeCompetitionGroupName ?? null);
@@ -1057,13 +1016,11 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     if (!timerEndsAt || timerPhase !== "ATTEMPT") return;
     const remainingMs = timerEndsAt - Date.now();
     const timeout = window.setTimeout(() => {
-      setTimerPhaseState("IDLE");
-      setTimerEndsAtState(null);
-      broadcast({ timerPhase: "IDLE", timerEndsAt: null });
+      setTimerState("IDLE", null);
     }, Math.max(0, remainingMs) + 60);
 
     return () => window.clearTimeout(timeout);
-  }, [timerEndsAt, timerPhase]);
+  }, [timerEndsAt, timerPhase, setTimerState]);
 
   useEffect(() => {
     const handleBootstrapMessage = (event: MessageEvent) => {
@@ -1130,6 +1087,10 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     socket.emit("SYNC_STATE", next);
     publishRemotePatch(next);
   };
+
+  useEffect(() => {
+    initializeStateManager(broadcast);
+  }, [broadcast]);
 
   const setActiveCompetitionGroupName = (name: string | null) => {
     setActiveCompetitionGroupNameState(name);
@@ -1353,8 +1314,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
       (entry) => !(entry.lifterId === lifterId && entry.lift === lift && entry.attemptIndex === attemptIndex),
     );
     if (remainingQueue.length !== nextAttemptQueue.length) {
-      setNextAttemptQueueState(remainingQueue);
-      broadcast({ nextAttemptQueue: remainingQueue });
+      setNextAttemptQueue(remainingQueue);
       if (timerPhase === "NEXT_ATTEMPT") {
         if (remainingQueue.length > 0) {
           startNextAttemptClock();
