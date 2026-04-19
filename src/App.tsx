@@ -729,21 +729,22 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     if (normalized.length > 0) {
       const first = normalized[0];
       setActiveCompetitionIdState(first.id);
-      setLifters(first.lifters);
-      setGroups(first.groups);
-      setCurrentLifterId(first.currentLifterId ?? first.lifters[0]?.id ?? null);
+      setLiftersState(first.lifters);
+      setGroupsState(first.groups);
+      setCurrentLifterIdState(first.currentLifterId ?? first.lifters[0]?.id ?? null);
       setRefereeSignals(first.refereeSignals);
-      setRefereeInputLocked(first.refereeInputLocked);
-      setCurrentLift(first.currentLift);
-      setCurrentAttemptIndex(first.currentAttemptIndex);
-      setCompetitionStarted(first.competitionStarted);
-      setIncludeCollars(first.includeCollars);
-      setTimerState(first.timerPhase, first.timerEndsAt);
-      setCompetitionMode(first.competitionMode);
-      setNextAttemptQueue(first.nextAttemptQueue);
-      setActiveCompetitionGroupName(first.activeCompetitionGroupName ?? null);
+      setRefereeInputLockedState(first.refereeInputLocked);
+      setCurrentLiftState(first.currentLift);
+      setCurrentAttemptIndexState(first.currentAttemptIndex);
+      setCompetitionStartedState(first.competitionStarted);
+      setIncludeCollarsState(first.includeCollars);
+      setTimerPhaseState(first.timerPhase);
+      setTimerEndsAtState(first.timerEndsAt);
+      setCompetitionModeState(first.competitionMode);
+      setNextAttemptQueueState(first.nextAttemptQueue);
+      setActiveCompetitionGroupNameState(first.activeCompetitionGroupName ?? null);
     }
-  }, [setLifters, setGroups, setCurrentLifterId, setRefereeSignals, setRefereeInputLocked, setCurrentLift, setCurrentAttemptIndex, setCompetitionStarted, setIncludeCollars, setTimerState, setCompetitionMode, setNextAttemptQueue, setActiveCompetitionGroupName]);
+  }, []);
 
   const onRefereeSignalsChanged = useCallback((signals: RefSignal[]) => {
     setRefereeSignals(signals);
@@ -1063,7 +1064,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     };
   }, [activeCompetitionId, applyIncomingState]);
 
-  const publishRemotePatch = (patch: Partial<AppContextValue>) => {
+  const publishRemotePatch = useCallback((patch: Partial<AppContextValue>) => {
     if (isDisplayScreen || !activeCompetitionId) return;
     const topic = toRelayTopic(activeCompetitionId);
     if (!topic) return;
@@ -1080,13 +1081,13 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
       body: JSON.stringify(relayPayload),
       keepalive: true,
     }).catch(() => null);
-  };
+  }, [isDisplayScreen, activeCompetitionId]);
 
-  const broadcast = (next: Partial<AppContextValue>) => {
+  const broadcast = useCallback((next: Partial<AppContextValue>) => {
     if (isDisplayScreen) return;
     socket.emit("SYNC_STATE", next);
     publishRemotePatch(next);
-  };
+  }, [isDisplayScreen, publishRemotePatch]);
 
   useEffect(() => {
     initializeStateManager(broadcast);
