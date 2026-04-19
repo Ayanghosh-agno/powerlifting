@@ -770,7 +770,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
       setLiftersState(first.lifters);
       setGroupsState(first.groups);
       setCurrentLifterIdState(first.currentLifterId ?? first.lifters[0]?.id ?? null);
-      setRefereeSignalsState(first.refereeSignals);
+      setRefereeSignals(first.refereeSignals);
       setRefereeInputLockedState(first.refereeInputLocked);
       setCurrentLiftState(first.currentLift);
       setCurrentAttemptIndexState(first.currentAttemptIndex);
@@ -785,7 +785,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   const onRefereeSignalsChanged = useCallback((signals: RefSignal[]) => {
-    setRefereeSignalsState(signals);
+    setRefereeSignals(signals);
     if (!isDisplayScreenRef.current) {
       socket.emit("SYNC_STATE", { refereeSignals: signals });
     }
@@ -820,7 +820,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
       setLiftersState(empty.lifters);
       setGroupsState(empty.groups);
       setCurrentLifterIdState(empty.currentLifterId);
-      setRefereeSignalsState(empty.refereeSignals);
+      setRefereeSignals(empty.refereeSignals);
       setRefereeInputLockedState(empty.refereeInputLocked);
       setCurrentLiftState(empty.currentLift);
       setCurrentAttemptIndexState(empty.currentAttemptIndex);
@@ -1243,7 +1243,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const setRefereeSignals = (signals: RefSignal[]) => {
-    setRefereeSignalsState(signals);
+    setRefereeSignals(signals);
     broadcast({ refereeSignals: signals });
   };
 
@@ -1301,9 +1301,9 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const resetSignals = useCallback(() => {
-    setRefereeSignalsState([null, null, null]);
+    setRefereeSignals([null, null, null]);
     clearSignals();
-  }, [clearSignals]);
+  }, [clearSignals, setRefereeSignals]);
 
   const submitNextAttempt = (weight: number) => {
     if (weight <= 0) return { ok: false, message: "Weight must be greater than 0." };
@@ -4640,7 +4640,7 @@ const RefereeStationPage = () => {
       const nextSignals = refereeSignals.map((signal, idx) => (idx === config.index ? decision : signal));
       publishRefereeSignal(config.index, decision);
       commitTimeoutRef.current = window.setTimeout(() => {
-        setRefereeSignalsState(nextSignals);
+        setRefereeSignals(nextSignals);
         commitTimeoutRef.current = null;
       }, 90);
       holdTimeoutRef.current = null;
@@ -5492,7 +5492,7 @@ const DisplayFullPage = () => {
           overlayHideTimeoutRef.current = window.setTimeout(() => {
             setOverlayPhase(null);
             setDisplaySignals([null, null, null]);
-            setRefereeSignalsState([null, null, null]);
+            setRefereeSignals([null, null, null]);
             clearSignals().catch(console.error);
           }, RESULT_OVERLAY_DISPLAY_MS);
         } else {
@@ -5501,7 +5501,7 @@ const DisplayFullPage = () => {
             setOverlayPhase(null);
             setShowSignalOverlay(false);
             setDisplaySignals([null, null, null]);
-            setRefereeSignalsState([null, null, null]);
+            setRefereeSignals([null, null, null]);
             clearSignals().catch(console.error);
           }, RESULT_OVERLAY_DISPLAY_MS);
         }
