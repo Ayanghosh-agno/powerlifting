@@ -5038,7 +5038,21 @@ const ResultsTable = memo(({
 
   const renderLifterRow = (lifter: RankedLifter, idx: number, groupName?: string) => {
     const isDual = isDualCategory(lifter.category);
-    const isGuest = isDual && groupName !== undefined && lifter.group !== groupName;
+
+    let isGuest = false;
+    if (isDual && groupName !== undefined) {
+      const [firstPart, secondPart] = getDualCategoryParts(lifter.category);
+      const groupNameUpper = groupName.toUpperCase();
+      const firstKeyword = firstPart.toUpperCase().split(" ")[0];
+      const secondKeyword = secondPart.toUpperCase().split(" ")[0];
+      const assignedGroupUpper = (Array.isArray(lifter.group) ? lifter.group[0] : lifter.group).toUpperCase();
+
+      const firstMatch = groupNameUpper.includes(firstKeyword);
+      const secondMatch = groupNameUpper.includes(secondKeyword);
+      const primaryGroupMatch = assignedGroupUpper.toUpperCase().includes(firstKeyword);
+
+      isGuest = secondMatch && !primaryGroupMatch;
+    }
 
     let displayCategory = lifter.category || "-";
     if (isDual && groupName !== undefined) {
@@ -5316,7 +5330,10 @@ const DisplayFullPage = () => {
         if (isInGroup(l.group, groupName)) return true;
         if (isDualCategory(l.category)) {
           const [firstPart, secondPart] = getDualCategoryParts(l.category);
-          if (firstPart === groupName || secondPart === groupName) return true;
+          const firstKeyword = firstPart.toUpperCase().split(" ")[0];
+          const secondKeyword = secondPart.toUpperCase().split(" ")[0];
+          const groupNameUpper = groupName.toUpperCase();
+          if (groupNameUpper.includes(firstKeyword) || groupNameUpper.includes(secondKeyword)) return true;
         }
         return false;
       });
