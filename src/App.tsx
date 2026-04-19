@@ -837,7 +837,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     setLiftersState(competition.lifters);
     setGroupsState(competition.groups);
     setCurrentLifterIdState(competition.currentLifterId ?? competition.lifters[0]?.id ?? null);
-    setRefereeSignalsState(competition.refereeSignals);
+    setRefereeSignalsState([null, null, null]);
     setRefereeInputLockedState(competition.refereeInputLocked);
     setCurrentLiftState(competition.currentLift);
     setCurrentAttemptIndexState(competition.currentAttemptIndex);
