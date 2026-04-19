@@ -87,6 +87,7 @@ type AppContextValue = {
   clearTimerState: () => void;
   nextAttemptQueue: NextAttemptEntry[];
   submitNextAttempt: (weight: number) => { ok: boolean; message: string };
+  clearSignals: () => Promise<void>;
   updateAttemptForLifter: (
     lifterId: string,
     lift: LiftType,
@@ -1537,6 +1538,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
         updateAttemptForLifter,
         applyRefereeDecision,
         resetSignals,
+        clearSignals,
         connectedRefereeSlots,
         publishRefereeSignal: publishSignal,
         trackRefereePresence: trackPresence,
