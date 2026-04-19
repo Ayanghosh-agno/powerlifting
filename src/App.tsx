@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, createContext, useContext, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, createContext, useContext, memo, type CSSProperties } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   HashRouter,
@@ -15,8 +15,6 @@ import {
 import { QRCodeSVG } from "qrcode.react";
 import indiaStateDistrictData from "../node_modules/india-states-districts/state_discripts.json";
 import { useSupabaseSync, type ConnectedRefereeSlots } from "./lib/useSupabaseSync";
-import { supabase } from "./lib/supabase";
-
 type LiftType = "squat" | "bench" | "deadlift";
 type AttemptStatus = "PENDING" | "GOOD" | "NO" | "UNATTEMPTED";
 type TimerPhase = "IDLE" | "ATTEMPT" | "NEXT_ATTEMPT";
@@ -4977,7 +4975,7 @@ const SettingsPage = () => {
 
 type RankedLifter = Lifter & { total: number; points: number };
 
-const ResultsTable = React.memo(({
+const ResultsTable = memo(({
   rankingByGroup,
   ungroupedRanking,
   currentLifterId,
@@ -5785,7 +5783,11 @@ const DbSetupBanner = () => {
     let interval: number;
     const check = async () => {
       try {
-        const { supabase } = await import("./lib/supabase");
+        const { supabase, isSupabaseConfigured } = await import("./lib/supabase");
+        if (!isSupabaseConfigured) {
+          setDbReady(true);
+          return;
+        }
         const { error } = await supabase.from("competitions").select("id").limit(1).maybeSingle();
         const ready = !error || error.code !== "PGRST205";
         setDbReady(ready);

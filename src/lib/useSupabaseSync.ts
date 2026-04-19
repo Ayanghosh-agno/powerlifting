@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback } from "react";
-import { supabase } from "./supabase";
+import { isSupabaseConfigured, supabase } from "./supabase";
 import { dbCompetitions, dbGroups, dbLifters, dbRefereeSignals } from "./db";
 
 type RefSignal = "GOOD" | "NO" | null;
@@ -177,6 +177,11 @@ export function useSupabaseSync(
   const { onCompetitionsLoaded, onRefereeSignalsChanged, onDevicesChanged } = callbacks;
 
   useEffect(() => {
+    if (!isSupabaseConfigured) {
+      dbReadyRef.current = true;
+      return;
+    }
+
     let cancelled = false;
 
     async function loadFromDb() {
@@ -232,7 +237,7 @@ export function useSupabaseSync(
   }, []);
 
   useEffect(() => {
-    if (readOnly || !dbReadyRef.current || !activeCompetitionId) return;
+    if (readOnly || !isSupabaseConfigured || !dbReadyRef.current || !activeCompetitionId) return;
     const comp = competitions.find((c) => c.id === activeCompetitionId);
     if (!comp) return;
 
@@ -254,7 +259,7 @@ export function useSupabaseSync(
   ]);
 
   useEffect(() => {
-    if (readOnly || !dbReadyRef.current || !activeCompetitionId) return;
+    if (readOnly || !isSupabaseConfigured || !dbReadyRef.current || !activeCompetitionId) return;
     const serialized = JSON.stringify(lifters.map((l) => lifterToDb(l, activeCompetitionId)));
     if (serialized === lastSavedLiftersRef.current) return;
     lastSavedLiftersRef.current = serialized;
@@ -272,7 +277,7 @@ export function useSupabaseSync(
   }, [readOnly, activeCompetitionId, lifters]);
 
   useEffect(() => {
-    if (readOnly || !dbReadyRef.current || !activeCompetitionId) return;
+    if (readOnly || !isSupabaseConfigured || !dbReadyRef.current || !activeCompetitionId) return;
     const serialized = JSON.stringify(groups);
     if (serialized === lastSavedGroupsRef.current) return;
     lastSavedGroupsRef.current = serialized;
@@ -290,7 +295,7 @@ export function useSupabaseSync(
   }, [readOnly, activeCompetitionId, groups]);
 
   useEffect(() => {
-    if (!activeCompetitionId) return;
+    if (!isSupabaseConfigured || !activeCompetitionId) return;
 
     const signalsSnapshot: RefSignal[] = [null, null, null];
 
@@ -364,7 +369,7 @@ export function useSupabaseSync(
   }, [activeCompetitionId, onRefereeSignalsChanged]);
 
   useEffect(() => {
-    if (!activeCompetitionId) return;
+    if (!isSupabaseConfigured || !activeCompetitionId) return;
 
     const rebuildSlots = (state: Record<string, { position: number }[]>) => {
       const slots: ConnectedRefereeSlots = { left: false, center: false, right: false };
@@ -400,7 +405,7 @@ export function useSupabaseSync(
 
   const publishSignal = useCallback(
     async (position: number, signal: RefSignal) => {
-      if (!activeCompetitionId) return;
+      if (!isSupabaseConfigured || !activeCompetitionId) return;
       try {
         await dbRefereeSignals.upsertSignal(activeCompetitionId, position, signal, deviceId);
       } catch {
@@ -410,7 +415,7 @@ export function useSupabaseSync(
   );
 
   const clearSignals = useCallback(async () => {
-    if (!activeCompetitionId) return;
+    if (!isSupabaseConfigured || !activeCompetitionId) return;
     try {
       await dbRefereeSignals.clearAll(activeCompetitionId);
     } catch {
@@ -418,6 +423,7 @@ export function useSupabaseSync(
   }, [activeCompetitionId]);
 
   const createCompetitionInDb = useCallback(async (comp: CompetitionRecord) => {
+    if (!isSupabaseConfigured) return;
     try {
       await dbCompetitions.upsert(competitionToDb(comp));
       dbReadyRef.current = true;
@@ -426,6 +432,7 @@ export function useSupabaseSync(
   }, []);
 
   const deleteCompetitionFromDb = useCallback(async (id: string) => {
+    if (!isSupabaseConfigured) return;
     try {
       await dbCompetitions.remove(id);
     } catch {
@@ -433,6 +440,7 @@ export function useSupabaseSync(
   }, []);
 
   const updateCompetitionNameInDb = useCallback(async (id: string, name: string) => {
+    if (!isSupabaseConfigured) return;
     try {
       await dbCompetitions.update(id, { name });
     } catch {

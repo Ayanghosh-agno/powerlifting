@@ -2,7 +2,8 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
 
-const rawPort = process.env.PORT || "5173";
+/** Default avoids clashing with other local Vite apps on 5173. Override with PORT=… */
+const rawPort = process.env.PORT || "5180";
 const port = Number(rawPort);
 
 if (Number.isNaN(port) || port <= 0) {
