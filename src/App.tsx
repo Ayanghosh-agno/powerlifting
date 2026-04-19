@@ -397,14 +397,14 @@ const resolveWeightClass = (sex: "Male" | "Female", bw: number | "", manualWeigh
 const getCategoryOptions = (sex: "Male" | "Female") => {
   const suffix = sex === "Male" ? "Men" : "Women";
   return [
-    `Sub-Junior ${suffix}`,
+    `Sub Junior ${suffix}`,
     `Junior ${suffix}`,
     `Senior ${suffix}`,
     `Master 1 ${suffix}`,
     `Master 2 ${suffix}`,
     `Master 3 ${suffix}`,
     `Master 4 ${suffix}`,
-    `Sub-Junior ${suffix} + Junior ${suffix}`,
+    `Sub Junior ${suffix} + Junior ${suffix}`,
     `Junior ${suffix} + Senior ${suffix}`,
     `Senior ${suffix} + Master ${suffix}`,
   ];
@@ -413,7 +413,7 @@ const getCategoryOptions = (sex: "Male" | "Female") => {
 const getDoubleCategoryOptions = (sex: "Male" | "Female") => {
   const suffix = sex === "Male" ? "Men" : "Women";
   return [
-    `Sub-Junior ${suffix} + Junior ${suffix}`,
+    `Sub Junior ${suffix} + Junior ${suffix}`,
     `Junior ${suffix} + Senior ${suffix}`,
     `Senior ${suffix} + Master ${suffix}`,
   ];
@@ -2615,7 +2615,7 @@ const LifterManagementPage = () => {
     dob: "",
     bodyweight: "" as number | "",
     manualWeightClass: "",
-    category: "Sub-Junior Men",
+    category: "Sub Junior Men",
     group: groups[0]?.name ?? "",
     team: "",
     rackHeightSquat: "" as number | "",
@@ -2646,7 +2646,7 @@ const LifterManagementPage = () => {
       dob: "",
       bodyweight: "",
       manualWeightClass: "",
-      category: "Sub-Junior Men",
+      category: "Sub Junior Men",
       group: groups[0]?.name ?? "",
       team: "",
       rackHeightSquat: "",
@@ -3909,7 +3909,7 @@ const GroupManagementPage = () => {
                 onChange={(e) => setDoubleCategoryType(e.target.value as "SUBJR_JR" | "JR_SR" | "SR_M1")}
                 className="h-8 rounded-lg border border-white/15 bg-black/40 px-2 text-xs text-white focus:outline-none"
               >
-                <option value="SUBJR_JR" className="bg-slate-900">Sub-Junior + Junior</option>
+                <option value="SUBJR_JR" className="bg-slate-900">Sub Junior + Junior</option>
                 <option value="JR_SR" className="bg-slate-900">Junior + Senior</option>
                 <option value="SR_M1" className="bg-slate-900">Senior + Master</option>
               </select>
