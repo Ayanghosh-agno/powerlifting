@@ -3555,7 +3555,13 @@ const GroupManagementPage = () => {
       if (doubleCategoryType === "JR_SR") return options[1];
       return options[2];
     };
-    setLifters(lifters.map((l) => !checkedLifterIds.includes(l.id) ? l : { ...l, category: getTargetCategory(l.sex) }));
+    setLifters(lifters.map((l) => {
+      if (!checkedLifterIds.includes(l.id)) return l;
+      const newCategory = getTargetCategory(l.sex);
+      const categoryParts = newCategory.split(" + ");
+      const firstPart = categoryParts[0];
+      return { ...l, category: newCategory, group: firstPart };
+    }));
     showNotice(`Dual category applied to ${checkedLifterIds.length} lifter(s).`);
   };
 
