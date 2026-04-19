@@ -5267,16 +5267,11 @@ const DisplayFullPage = () => {
 
   const rankingByGroup = useMemo(() => {
     return allGroupNames.map((groupName) => {
-      const groupNameLower = groupName.toLowerCase();
       const members = ranking.filter((l) => {
         if (l.group === groupName) return true;
         if (isDualCategory(l.category)) {
           const [firstPart, secondPart] = getDualCategoryParts(l.category);
-          const firstKeywords = firstPart.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
-          const secondKeywords = secondPart.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
-          const matchesFirst = firstKeywords.some((kw) => groupNameLower.includes(kw));
-          const matchesSecond = secondKeywords.some((kw) => groupNameLower.includes(kw));
-          if (matchesFirst || matchesSecond) return true;
+          if (firstPart === groupName || secondPart === groupName) return true;
         }
         return false;
       });
