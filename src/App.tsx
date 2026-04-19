@@ -5484,14 +5484,22 @@ const DisplayFullPage = () => {
       if (allGood) {
         setOverlayPhase("circles");
         overlayPhaseTimeoutRef.current = window.setTimeout(() => setOverlayPhase("lift"), 2000);
-        overlayHideTimeoutRef.current = window.setTimeout(() => { setOverlayPhase(null); }, RESULT_OVERLAY_DISPLAY_MS);
+        overlayHideTimeoutRef.current = window.setTimeout(() => {
+          setOverlayPhase(null);
+          setDisplaySignals([null, null, null]);
+          clearSignals();
+        }, RESULT_OVERLAY_DISPLAY_MS);
       } else {
         setShowSignalOverlay(true);
-        overlayHideTimeoutRef.current = window.setTimeout(() => setShowSignalOverlay(false), RESULT_OVERLAY_DISPLAY_MS);
+        overlayHideTimeoutRef.current = window.setTimeout(() => {
+          setShowSignalOverlay(false);
+          setDisplaySignals([null, null, null]);
+          clearSignals();
+        }, RESULT_OVERLAY_DISPLAY_MS);
       }
     }
     return undefined;
-  }, [refereeSignals]);
+  }, [refereeSignals, clearSignals]);
 
   useEffect(() => {
     return () => {
