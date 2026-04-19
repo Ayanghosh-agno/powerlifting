@@ -3567,14 +3567,21 @@ const GroupManagementPage = () => {
     setCheckedLifterIds([]);
   };
 
-  const categoryToGroupNames = (categoryPart: string): string[] => {
-    const groupsForCategory = groups.filter((g) => {
-      const groupNameUpper = g.name.toUpperCase();
-      const categoryUpper = categoryPart.toUpperCase();
-      return groupNameUpper.includes(categoryUpper.split(" ")[0]) ||
-             groupNameUpper.includes(categoryUpper.replace(/\s+/g, ""));
+  const categoryToGroupNames = (weightClass: string, categoryParts: string[]): string[] => {
+    const groupIds: string[] = [];
+
+    categoryParts.forEach((categoryPart) => {
+      const categoryUpper = categoryPart.toUpperCase().split(" ")[0];
+      const matchingGroup = groups.find((g) => {
+        const groupNameUpper = g.name.toUpperCase();
+        return groupNameUpper.startsWith(weightClass) && groupNameUpper.includes(categoryUpper);
+      });
+      if (matchingGroup) {
+        groupIds.push(matchingGroup.name);
+      }
     });
-    return groupsForCategory.map((g) => g.id);
+
+    return groupIds;
   };
 
   const markCheckedAsDoubleCategory = () => {
@@ -3588,9 +3595,9 @@ const GroupManagementPage = () => {
     setLifters(lifters.map((l) => {
       if (!checkedLifterIds.includes(l.id)) return l;
       const newCategory = getTargetCategory(l.sex);
-      const categoryParts = newCategory.split(" + ");
-      const groupIds = categoryParts.flatMap((part) => categoryToGroupNames(part.trim()));
-      return { ...l, category: newCategory, group: groupIds.length > 0 ? groupIds : categoryParts[0] };
+      const categoryParts = newCategory.split(" + ").map((p) => p.trim());
+      const groupNames = categoryToGroupNames(l.weightClass, categoryParts);
+      return { ...l, category: newCategory, group: groupNames.length > 0 ? (groupNames.length === 1 ? groupNames[0] : groupNames) : categoryParts[0] };
     }));
     showNotice(`Dual category applied to ${checkedLifterIds.length} lifter(s).`);
   };
