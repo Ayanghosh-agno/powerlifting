@@ -1087,7 +1087,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
   }, [activeCompetitionId, applyIncomingState]);
 
   const publishRemotePatch = (patch: Partial<AppContextValue>) => {
-    if (!activeCompetitionId) return;
+    if (isDisplayScreen || !activeCompetitionId) return;
     const topic = toRelayTopic(activeCompetitionId);
     if (!topic) return;
 
@@ -1106,6 +1106,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const broadcast = (next: Partial<AppContextValue>) => {
+    if (isDisplayScreen) return;
     socket.emit("SYNC_STATE", next);
     publishRemotePatch(next);
   };
@@ -5242,6 +5243,11 @@ const DisplayFullPage = () => {
               <div className="rounded-xl border border-white/20 bg-black/30 p-3 text-center">
                 <p className="text-[clamp(0.8rem,1.8vw,1.3rem)] font-semibold uppercase tracking-[0.2em] text-cyan-200">
                   {currentLift.toUpperCase()} ATTEMPT {currentAttemptIndex + 1}
+                  {activeCompetitionGroupName && (
+                    <span className="ml-3 text-[clamp(0.7rem,1.4vw,1rem)] font-normal normal-case tracking-normal text-slate-300">
+                      — {activeCompetitionGroupName}
+                    </span>
+                  )}
                 </p>
               </div>
               <div className="grid flex-none gap-2 md:grid-cols-3">
@@ -5256,6 +5262,9 @@ const DisplayFullPage = () => {
                     >
                       <p className="text-[10px] font-semibold uppercase tracking-widest text-cyan-200">#{idx + 1}</p>
                       <p className="mt-1 text-[clamp(1rem,2.5vw,2rem)] font-black uppercase leading-tight">{lifter.name || "-"}</p>
+                      {lifter.group && !activeCompetitionGroupName && (
+                        <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-widest text-amber-300/80">{lifter.group}</p>
+                      )}
                       <p className="mt-1 text-[clamp(0.9rem,2vw,1.6rem)] font-bold">
                         {attemptWeight === null ? "-" : `${attemptWeight.toFixed(1)} kg`}
                       </p>
@@ -5269,22 +5278,36 @@ const DisplayFullPage = () => {
               <div className="rounded-xl border border-white/15 bg-black/20 p-3">
                 <p className="mb-2 text-[10px] uppercase tracking-widest text-cyan-300">Other Lifters</p>
                 <div className="space-y-1">
-                  {orderedByCurrentRound.slice(3).map((lifter, idx) => {
-                    const attemptWeight = getAttemptValue(lifter, currentLift, currentAttemptIndex);
-                    return (
-                      <div
-                        key={lifter.id}
-                        className={`flex items-center justify-between rounded-lg border px-3 py-1.5 text-sm ${
-                          lifter.id === currentLifterId ? "border-cyan-300/70 bg-cyan-500/10" : "border-white/10 bg-white/5"
-                        }`}
-                      >
-                        <span className="font-semibold">{idx + 4}. {lifter.name}</span>
-                        <span className="text-slate-300 text-xs">
-                          {attemptWeight === null ? "-" : `${attemptWeight.toFixed(1)} kg`} · BW {typeof lifter.bodyweight === "number" ? lifter.bodyweight : "-"} · Lot {typeof lifter.lot === "number" ? lifter.lot : "-"}
-                        </span>
-                      </div>
-                    );
-                  })}
+                  {(() => {
+                    const rest = orderedByCurrentRound.slice(3);
+                    const rows: React.ReactNode[] = [];
+                    let lastGroup: string | undefined = undefined;
+                    rest.forEach((lifter, idx) => {
+                      const attemptWeight = getAttemptValue(lifter, currentLift, currentAttemptIndex);
+                      if (!activeCompetitionGroupName && lifter.group && lifter.group !== lastGroup) {
+                        lastGroup = lifter.group;
+                        rows.push(
+                          <div key={`group-sep-${lifter.group}-${idx}`} className="px-1 pt-1 pb-0.5">
+                            <span className="text-[10px] font-bold uppercase tracking-widest text-amber-300/80">{lifter.group}</span>
+                          </div>
+                        );
+                      }
+                      rows.push(
+                        <div
+                          key={lifter.id}
+                          className={`flex items-center justify-between rounded-lg border px-3 py-1.5 text-sm ${
+                            lifter.id === currentLifterId ? "border-cyan-300/70 bg-cyan-500/10" : "border-white/10 bg-white/5"
+                          }`}
+                        >
+                          <span className="font-semibold">{idx + 4}. {lifter.name}</span>
+                          <span className="text-slate-300 text-xs">
+                            {attemptWeight === null ? "-" : `${attemptWeight.toFixed(1)} kg`} · BW {typeof lifter.bodyweight === "number" ? lifter.bodyweight : "-"} · Lot {typeof lifter.lot === "number" ? lifter.lot : "-"}
+                          </span>
+                        </div>
+                      );
+                    });
+                    return rows;
+                  })()}
                   {orderedByCurrentRound.length === 0 && (
                     <p className="text-sm text-slate-400">No lifters added yet.</p>
                   )}
