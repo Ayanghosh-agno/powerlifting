@@ -3444,7 +3444,8 @@ const GroupManagementPage = () => {
 
     selectedWeightClasses.forEach((wc) => {
       selectedCategories.forEach((cat) => {
-        const groupName = `${wc} ${cat}`;
+        const weightNum = wc.replace(/[^0-9.]/g, "");
+        const groupName = `${weightNum} ${cat}`;
         if (!existingGroupNames.has(groupName)) {
           groupsToCreate.push({
             id: `group-${Date.now()}-${Math.random()}`,
