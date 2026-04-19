@@ -5421,6 +5421,7 @@ const DisplayFullPage = () => {
   const [displayTheme, setDisplayTheme] = useState<DisplayThemeKey>("black");
   const prevSignalsRef = useRef<string>("");
   const overlayHideTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const overlayPhaseTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const cycleDisplayTheme = () => {
     setDisplayTheme((prev) => {
@@ -5476,15 +5477,17 @@ const DisplayFullPage = () => {
     if (refereeSignals.every((signal) => signal !== null)) {
       setDisplaySignals(refereeSignals);
       const allGood = refereeSignals.every((s) => s === "GOOD");
+
+      if (overlayPhaseTimeoutRef.current) window.clearTimeout(overlayPhaseTimeoutRef.current);
+      if (overlayHideTimeoutRef.current) window.clearTimeout(overlayHideTimeoutRef.current);
+
       if (allGood) {
         setOverlayPhase("circles");
-        const t1 = window.setTimeout(() => setOverlayPhase("lift"), 2000);
-        const t2 = window.setTimeout(() => { setOverlayPhase(null); }, RESULT_OVERLAY_DISPLAY_MS);
-        return () => { window.clearTimeout(t1); window.clearTimeout(t2); };
+        overlayPhaseTimeoutRef.current = window.setTimeout(() => setOverlayPhase("lift"), 2000);
+        overlayHideTimeoutRef.current = window.setTimeout(() => { setOverlayPhase(null); }, RESULT_OVERLAY_DISPLAY_MS);
       } else {
         setShowSignalOverlay(true);
-        const t = window.setTimeout(() => setShowSignalOverlay(false), RESULT_OVERLAY_DISPLAY_MS);
-        return () => window.clearTimeout(t);
+        overlayHideTimeoutRef.current = window.setTimeout(() => setShowSignalOverlay(false), RESULT_OVERLAY_DISPLAY_MS);
       }
     }
     return undefined;
@@ -5494,6 +5497,9 @@ const DisplayFullPage = () => {
     return () => {
       if (overlayHideTimeoutRef.current) {
         window.clearTimeout(overlayHideTimeoutRef.current);
+      }
+      if (overlayPhaseTimeoutRef.current) {
+        window.clearTimeout(overlayPhaseTimeoutRef.current);
       }
     };
   }, []);
