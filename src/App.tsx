@@ -5076,6 +5076,42 @@ const DisplayFullPage = () => {
     [lifters],
   );
 
+  const isDualCategory = (category: string) => category.includes(" + ");
+
+  const getDualCategoryParts = (category: string): [string, string] => {
+    const idx = category.indexOf(" + ");
+    return [category.slice(0, idx).trim(), category.slice(idx + 3).trim()];
+  };
+
+  const allGroupNames = useMemo(() => {
+    const seen = new Set<string>();
+    lifters.forEach((l) => { if (l.group) seen.add(l.group); });
+    return Array.from(seen).sort();
+  }, [lifters]);
+
+  const rankingByGroup = useMemo(() => {
+    return allGroupNames.map((groupName) => {
+      const groupNameLower = groupName.toLowerCase();
+      const members = ranking.filter((l) => {
+        if (l.group === groupName) return true;
+        if (l.group !== groupName && isDualCategory(l.category)) {
+          const [, secondPart] = getDualCategoryParts(l.category);
+          const keywords = secondPart.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
+          const matchesSecond = keywords.some((kw) => groupNameLower.includes(kw));
+          if (matchesSecond) return true;
+        }
+        return false;
+      });
+      const sorted = [...members].sort((a, b) => b.points - a.points);
+      return { groupName, members: sorted };
+    });
+  }, [ranking, allGroupNames]);
+
+  const ungroupedRanking = useMemo(
+    () => ranking.filter((l) => !l.group),
+    [ranking],
+  );
+
   const displaySessionLifters = useMemo(
     () =>
       activeCompetitionGroupName !== null
@@ -5254,52 +5290,142 @@ const DisplayFullPage = () => {
               </div>
             </div>
           ) : (
-            <div className="h-full overflow-auto rounded-xl border border-white/15 bg-black/20">
-              <table className="w-full min-w-[900px] text-xs md:text-sm">
-                <thead className="sticky top-0 bg-slate-900 text-left text-slate-300">
-                  <tr>
-                    <th className="px-3 py-2">#</th>
-                    <th className="px-3 py-2">Lifter</th>
-                    <th className="px-3 py-2 hidden md:table-cell">Group</th>
-                    <th className="px-3 py-2 hidden md:table-cell">Team</th>
-                    <th className="px-3 py-2">SQ1</th>
-                    <th className="px-3 py-2">SQ2</th>
-                    <th className="px-3 py-2">SQ3</th>
-                    <th className="px-3 py-2">BP1</th>
-                    <th className="px-3 py-2">BP2</th>
-                    <th className="px-3 py-2">BP3</th>
-                    <th className="px-3 py-2">DL1</th>
-                    <th className="px-3 py-2">DL2</th>
-                    <th className="px-3 py-2">DL3</th>
-                    <th className="px-3 py-2 font-semibold">Total</th>
-                    <th className="px-3 py-2 hidden md:table-cell">GL</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {ranking.map((lifter, idx) => (
-                    <tr
-                      key={lifter.id}
-                      className={`border-t border-white/10 ${lifter.id === currentLifterId ? "bg-cyan-500/10" : ""}`}
-                    >
-                      <td className="px-3 py-2">{idx + 1}</td>
-                      <td className="px-3 py-2 font-semibold">{lifter.name || "-"}</td>
-                      <td className="px-3 py-2 hidden md:table-cell">{lifter.group || "-"}</td>
-                      <td className="px-3 py-2 hidden md:table-cell">{lifter.team || "-"}</td>
-                      <AttemptDisplayCell attempt={lifter.squatAttempts[0]} />
-                      <AttemptDisplayCell attempt={lifter.squatAttempts[1]} />
-                      <AttemptDisplayCell attempt={lifter.squatAttempts[2]} />
-                      <AttemptDisplayCell attempt={lifter.benchAttempts[0]} />
-                      <AttemptDisplayCell attempt={lifter.benchAttempts[1]} />
-                      <AttemptDisplayCell attempt={lifter.benchAttempts[2]} />
-                      <AttemptDisplayCell attempt={lifter.deadliftAttempts[0]} />
-                      <AttemptDisplayCell attempt={lifter.deadliftAttempts[1]} />
-                      <AttemptDisplayCell attempt={lifter.deadliftAttempts[2]} />
-                      <td className="px-3 py-2 font-semibold">{lifter.total} kg</td>
-                      <td className="px-3 py-2 hidden md:table-cell">{lifter.points}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="h-full space-y-4 overflow-auto">
+              {rankingByGroup.map(({ groupName, members }) => (
+                <div key={groupName} className="rounded-xl border border-white/15 bg-black/20 overflow-hidden">
+                  <div className={`px-4 py-2 border-b border-white/10 ${isDarkTheme ? "bg-white/5" : "bg-black/10"}`}>
+                    <p className="text-[clamp(0.7rem,1.4vw,0.9rem)] font-bold uppercase tracking-[0.18em] text-cyan-300">
+                      {groupName}
+                      <span className="ml-2 text-slate-400 font-normal normal-case tracking-normal">({members.length} lifter{members.length !== 1 ? "s" : ""})</span>
+                    </p>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[820px] text-xs md:text-sm">
+                      <thead className={`text-left ${isDarkTheme ? "text-slate-300 bg-white/[0.03]" : "text-slate-600 bg-black/5"}`}>
+                        <tr>
+                          <th className="px-3 py-2">#</th>
+                          <th className="px-3 py-2">Lifter</th>
+                          <th className="px-3 py-2 hidden md:table-cell">Category</th>
+                          <th className="px-3 py-2 hidden md:table-cell">Team</th>
+                          <th className="px-3 py-2">SQ1</th>
+                          <th className="px-3 py-2">SQ2</th>
+                          <th className="px-3 py-2">SQ3</th>
+                          <th className="px-3 py-2">BP1</th>
+                          <th className="px-3 py-2">BP2</th>
+                          <th className="px-3 py-2">BP3</th>
+                          <th className="px-3 py-2">DL1</th>
+                          <th className="px-3 py-2">DL2</th>
+                          <th className="px-3 py-2">DL3</th>
+                          <th className="px-3 py-2 font-semibold">Total</th>
+                          <th className="px-3 py-2 hidden md:table-cell">GL</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {members.length === 0 && (
+                          <tr>
+                            <td colSpan={15} className="px-3 py-4 text-center text-slate-500 text-xs">No lifters in this group.</td>
+                          </tr>
+                        )}
+                        {members.map((lifter, idx) => {
+                          const isDual = isDualCategory(lifter.category);
+                          const isGuest = isDual && lifter.group !== groupName;
+                          return (
+                            <tr
+                              key={`${lifter.id}-${groupName}`}
+                              className={`border-t border-white/8 ${lifter.id === currentLifterId ? "bg-cyan-500/10" : idx % 2 === 0 ? "" : isDarkTheme ? "bg-white/[0.015]" : "bg-black/[0.02]"} ${isGuest ? isDarkTheme ? "opacity-80" : "opacity-75" : ""}`}
+                            >
+                              <td className="px-3 py-2 text-slate-400">{idx + 1}</td>
+                              <td className="px-3 py-2 font-semibold">
+                                <span>{lifter.name || "-"}</span>
+                                {isGuest && (
+                                  <span className="ml-1.5 rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300">DUAL</span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2 hidden md:table-cell text-slate-400 text-xs">{lifter.category || "-"}</td>
+                              <td className="px-3 py-2 hidden md:table-cell text-slate-400">{lifter.team || "-"}</td>
+                              <AttemptDisplayCell attempt={lifter.squatAttempts[0]} />
+                              <AttemptDisplayCell attempt={lifter.squatAttempts[1]} />
+                              <AttemptDisplayCell attempt={lifter.squatAttempts[2]} />
+                              <AttemptDisplayCell attempt={lifter.benchAttempts[0]} />
+                              <AttemptDisplayCell attempt={lifter.benchAttempts[1]} />
+                              <AttemptDisplayCell attempt={lifter.benchAttempts[2]} />
+                              <AttemptDisplayCell attempt={lifter.deadliftAttempts[0]} />
+                              <AttemptDisplayCell attempt={lifter.deadliftAttempts[1]} />
+                              <AttemptDisplayCell attempt={lifter.deadliftAttempts[2]} />
+                              <td className="px-3 py-2 font-semibold">{lifter.total > 0 ? `${lifter.total} kg` : "-"}</td>
+                              <td className="px-3 py-2 hidden md:table-cell text-slate-400">{lifter.points || "-"}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ))}
+
+              {ungroupedRanking.length > 0 && (
+                <div className="rounded-xl border border-white/10 bg-black/20 overflow-hidden">
+                  <div className={`px-4 py-2 border-b border-white/10 ${isDarkTheme ? "bg-white/5" : "bg-black/10"}`}>
+                    <p className="text-[clamp(0.7rem,1.4vw,0.9rem)] font-bold uppercase tracking-[0.18em] text-slate-400">
+                      Ungrouped
+                      <span className="ml-2 font-normal normal-case tracking-normal">({ungroupedRanking.length} lifter{ungroupedRanking.length !== 1 ? "s" : ""})</span>
+                    </p>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[820px] text-xs md:text-sm">
+                      <thead className={`text-left ${isDarkTheme ? "text-slate-300 bg-white/[0.03]" : "text-slate-600 bg-black/5"}`}>
+                        <tr>
+                          <th className="px-3 py-2">#</th>
+                          <th className="px-3 py-2">Lifter</th>
+                          <th className="px-3 py-2 hidden md:table-cell">Category</th>
+                          <th className="px-3 py-2 hidden md:table-cell">Team</th>
+                          <th className="px-3 py-2">SQ1</th>
+                          <th className="px-3 py-2">SQ2</th>
+                          <th className="px-3 py-2">SQ3</th>
+                          <th className="px-3 py-2">BP1</th>
+                          <th className="px-3 py-2">BP2</th>
+                          <th className="px-3 py-2">BP3</th>
+                          <th className="px-3 py-2">DL1</th>
+                          <th className="px-3 py-2">DL2</th>
+                          <th className="px-3 py-2">DL3</th>
+                          <th className="px-3 py-2 font-semibold">Total</th>
+                          <th className="px-3 py-2 hidden md:table-cell">GL</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {ungroupedRanking.map((lifter, idx) => (
+                          <tr
+                            key={lifter.id}
+                            className={`border-t border-white/8 ${lifter.id === currentLifterId ? "bg-cyan-500/10" : ""}`}
+                          >
+                            <td className="px-3 py-2 text-slate-400">{idx + 1}</td>
+                            <td className="px-3 py-2 font-semibold">{lifter.name || "-"}</td>
+                            <td className="px-3 py-2 hidden md:table-cell text-slate-400 text-xs">{lifter.category || "-"}</td>
+                            <td className="px-3 py-2 hidden md:table-cell text-slate-400">{lifter.team || "-"}</td>
+                            <AttemptDisplayCell attempt={lifter.squatAttempts[0]} />
+                            <AttemptDisplayCell attempt={lifter.squatAttempts[1]} />
+                            <AttemptDisplayCell attempt={lifter.squatAttempts[2]} />
+                            <AttemptDisplayCell attempt={lifter.benchAttempts[0]} />
+                            <AttemptDisplayCell attempt={lifter.benchAttempts[1]} />
+                            <AttemptDisplayCell attempt={lifter.benchAttempts[2]} />
+                            <AttemptDisplayCell attempt={lifter.deadliftAttempts[0]} />
+                            <AttemptDisplayCell attempt={lifter.deadliftAttempts[1]} />
+                            <AttemptDisplayCell attempt={lifter.deadliftAttempts[2]} />
+                            <td className="px-3 py-2 font-semibold">{lifter.total > 0 ? `${lifter.total} kg` : "-"}</td>
+                            <td className="px-3 py-2 hidden md:table-cell text-slate-400">{lifter.points || "-"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {rankingByGroup.length === 0 && ungroupedRanking.length === 0 && (
+                <div className="flex h-32 items-center justify-center rounded-xl border border-white/10 bg-black/20">
+                  <p className="text-sm text-slate-500">No lifters in results yet.</p>
+                </div>
+              )}
             </div>
           )}
         </div>
