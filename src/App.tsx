@@ -4309,8 +4309,8 @@ const RefereePage = () => {
 
     const loadActiveSession = async () => {
       try {
-        const session = await dbRefereeSessions.getActiveForCompetition(activeCompetitionId);
-        setActiveSession(session);
+        const sessions = await dbRefereeSessions.getActiveForCompetition(activeCompetitionId);
+        setActiveSession(sessions[0] || null);
       } catch (error) {
         console.error("Failed to load active session:", error);
         setActiveSession(null);
