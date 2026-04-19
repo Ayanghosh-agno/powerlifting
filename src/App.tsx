@@ -4348,9 +4348,12 @@ const RefereePage = () => {
     activeCompetitionGroupName,
   });
 
-  const buildRefereeLink = (slot: RefereeSlot) => {
-    const cidParam = activeCompetitionId ? `?cid=${encodeURIComponent(activeCompetitionId)}` : "";
-    const url = `${window.location.origin}${window.location.pathname}#/signals/${slot}${cidParam}`;
+  const buildRefereeLink = (slot: RefereeSlot, sessionId?: string) => {
+    const params = new URLSearchParams();
+    if (activeCompetitionId) params.set("cid", activeCompetitionId);
+    if (sessionId) params.set("session", sessionId);
+    const queryString = params.toString();
+    const url = `${window.location.origin}${window.location.pathname}#/signals/${slot}${queryString ? `?${queryString}` : ""}`;
     return { url, seedValue: "" };
   };
 
@@ -4378,10 +4381,17 @@ const RefereePage = () => {
     postBootstrap();
   };
 
-  const openQrForSlot = (slot: RefereeSlot, title: string) => {
+  const openQrForSlot = async (slot: RefereeSlot, title: string) => {
     setLinkCopied(false);
-    const { url } = buildRefereeLink(slot);
-    setQrModal({ slot, title, url });
+    try {
+      if (!activeCompetitionId) return;
+      const session = await dbRefereeSessions.create(activeCompetitionId);
+      const { url } = buildRefereeLink(slot, session.id);
+      setQrModal({ slot, title, url });
+      setActiveSession(session);
+    } catch (error) {
+      console.error("Failed to create referee session:", error);
+    }
   };
 
   const copyRefereeLink = async () => {
