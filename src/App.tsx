@@ -1243,7 +1243,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const setRefereeSignals = (signals: RefSignal[]) => {
-    setRefereeSignals(signals);
+    setRefereeSignalsState(signals);
     broadcast({ refereeSignals: signals });
   };
 
