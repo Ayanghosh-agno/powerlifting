@@ -5492,7 +5492,7 @@ const DisplayFullPage = () => {
           overlayHideTimeoutRef.current = window.setTimeout(() => {
             setOverlayPhase(null);
             setDisplaySignals([null, null, null]);
-            setRefereeSignalsState([null, null, null]);
+            setRefereeSignals([null, null, null]);
             clearSignals().catch(console.error);
           }, RESULT_OVERLAY_DISPLAY_MS);
         } else {
@@ -5501,7 +5501,7 @@ const DisplayFullPage = () => {
             setOverlayPhase(null);
             setShowSignalOverlay(false);
             setDisplaySignals([null, null, null]);
-            setRefereeSignalsState([null, null, null]);
+            setRefereeSignals([null, null, null]);
             clearSignals().catch(console.error);
           }, RESULT_OVERLAY_DISPLAY_MS);
         }
