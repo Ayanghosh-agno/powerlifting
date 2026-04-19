@@ -383,6 +383,8 @@ export function useSupabaseSync(
   useEffect(() => {
     if (!isSupabaseConfigured || !activeCompetitionId) return;
 
+    let cancelled = false;
+
     const rebuildSlots = (state: Record<string, { position: number }[]>) => {
       const slots: ConnectedRefereeSlots = { left: false, center: false, right: false };
       for (const presences of Object.values(state)) {
@@ -397,19 +399,22 @@ export function useSupabaseSync(
     const ch = supabase
       .channel(`referee-presence-observer-${activeCompetitionId}`)
       .on("presence", { event: "sync" }, () => {
-        onDevicesChanged(rebuildSlots(ch.presenceState<{ position: number }>()));
+        if (!cancelled) onDevicesChanged(rebuildSlots(ch.presenceState<{ position: number }>()));
       })
       .on("presence", { event: "join" }, () => {
-        onDevicesChanged(rebuildSlots(ch.presenceState<{ position: number }>()));
+        if (!cancelled) onDevicesChanged(rebuildSlots(ch.presenceState<{ position: number }>()));
       })
       .on("presence", { event: "leave" }, () => {
-        onDevicesChanged(rebuildSlots(ch.presenceState<{ position: number }>()));
+        if (!cancelled) onDevicesChanged(rebuildSlots(ch.presenceState<{ position: number }>()));
       })
-      .subscribe();
-
-    presenceChannelRef.current = ch;
+      .subscribe((status) => {
+        if (!cancelled && status === "SUBSCRIBED") {
+          presenceChannelRef.current = ch;
+        }
+      });
 
     return () => {
+      cancelled = true;
       presenceChannelRef.current = null;
       supabase.removeChannel(ch);
     };
@@ -465,10 +470,16 @@ export function useSupabaseSync(
     if (!ch) return;
     try {
       const state = ch.state;
-      if (state === "closed" || state === "errored") {
-        await new Promise<void>((resolve) => {
+      if (state !== "subscribed") {
+        await new Promise<void>((resolve, reject) => {
+          const timeoutId = setTimeout(() => {
+            reject(new Error("Presence channel subscription timeout"));
+          }, 5000);
           ch.subscribe((status) => {
-            if (status === "SUBSCRIBED") resolve();
+            if (status === "SUBSCRIBED") {
+              clearTimeout(timeoutId);
+              resolve();
+            }
           });
         });
       }
