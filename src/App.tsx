@@ -4306,6 +4306,44 @@ const RefereeStationPage = () => {
   }, [activeCompetitionId, config, trackRefereePresence, untrackRefereePresence]);
 
   useEffect(() => {
+    if (!config || !activeCompetitionId) return;
+
+    const retrack = () => {
+      if (document.visibilityState === "visible") {
+        trackRefereePresence(config.index);
+      }
+    };
+
+    const handleOnline = () => {
+      trackRefereePresence(config.index);
+    };
+
+    document.addEventListener("visibilitychange", retrack);
+    window.addEventListener("focus", retrack);
+    window.addEventListener("online", handleOnline);
+
+    return () => {
+      document.removeEventListener("visibilitychange", retrack);
+      window.removeEventListener("focus", retrack);
+      window.removeEventListener("online", handleOnline);
+    };
+  }, [activeCompetitionId, config, trackRefereePresence]);
+
+  useEffect(() => {
+    if (!config || !activeCompetitionId) return;
+
+    const heartbeat = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        trackRefereePresence(config.index);
+      }
+    }, 20000);
+
+    return () => {
+      window.clearInterval(heartbeat);
+    };
+  }, [activeCompetitionId, config, trackRefereePresence]);
+
+  useEffect(() => {
     if (refereeSignals.every((signal) => signal !== null)) {
       const timer = window.setTimeout(() => applyRefereeDecision(), 240);
       return () => window.clearTimeout(timer);

@@ -405,6 +405,14 @@ export function useSupabaseSync(
     const ch = presenceChannelRef.current;
     if (!ch) return;
     try {
+      const state = ch.state;
+      if (state === "closed" || state === "errored") {
+        await new Promise<void>((resolve) => {
+          ch.subscribe((status) => {
+            if (status === "SUBSCRIBED") resolve();
+          });
+        });
+      }
       await ch.track({ position });
     } catch {
     }
