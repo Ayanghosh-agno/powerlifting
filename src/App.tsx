@@ -4916,6 +4916,33 @@ const RefereeStationPage = () => {
     }, REFEREE_CONFIRM_DELAY_MS);
   };
 
+  if (!config) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#05070f] text-white">
+        <InvalidSessionError title="Invalid Station" message="The referee station URL is invalid. Please check your link and try again." />
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#05070f] text-white">
+        <div className="text-center">
+          <Spinner />
+          <p className="mt-4 text-slate-300">Validating session...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !isValid) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#05070f] text-white">
+        <InvalidSessionError title="Invalid Session" message={error || "This referee session is no longer valid. Please request a new link from the coordinator."} />
+      </div>
+    );
+  }
+
   const countdown = decisionEndsAt ? Math.max(0, (decisionEndsAt - now) / 1000) : 0;
   const currentSignal = refereeSignals[config.index];
 
