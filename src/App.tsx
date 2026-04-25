@@ -87,6 +87,7 @@ type AppContextValue = {
   publishRefereeSignal: (position: number, signal: RefSignal) => Promise<void>;
   trackRefereePresence: (position: number) => Promise<void>;
   untrackRefereePresence: () => void;
+  setCurrentRefereeSessionId: (sessionId: string | null) => void;
 };
 
 
@@ -724,6 +725,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
   const [competitionMode, setCompetitionModeState] = useState<CompetitionMode>("FULL_GAME");
   const [nextAttemptQueue, setNextAttemptQueueState] = useState<NextAttemptEntry[]>([]);
   const [activeCompetitionGroupName, setActiveCompetitionGroupNameState] = useState<string | null>(null);
+  const [currentRefreeSessionId, setCurrentRefreeSessionIdState] = useState<string | null>(null);
 
   const onCompetitionsLoaded = useCallback((loadedComps: CompetitionRecord[]) => {
     if (loadedComps.length === 0) return;
@@ -776,7 +778,8 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     refereeSignals,
     { onCompetitionsLoaded, onRefereeSignalsChanged, onDevicesChanged },
     deviceIdRef.current,
-    isDisplayScreen
+    isDisplayScreen,
+    currentRefreeSessionId
   );
 
   const publishRemotePatch = useCallback((patch: Partial<AppContextValue>) => {
@@ -1508,6 +1511,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
         publishRefereeSignal: publishSignal,
         trackRefereePresence: trackPresence,
         untrackRefereePresence: untrackPresence,
+        setCurrentRefreeSessionId,
       }}
     >
       {children}
@@ -4757,6 +4761,7 @@ const RefereeStationPage = () => {
     publishRefereeSignal,
     trackRefereePresence,
     untrackRefereePresence,
+    setCurrentRefereeSessionId,
   } = useAppContext();
   const [decisionEndsAt, setDecisionEndsAt] = useState<number | null>(null);
   const [pendingDecision, setPendingDecision] = useState<Exclude<RefSignal, null> | null>(null);
@@ -4779,6 +4784,10 @@ const RefereeStationPage = () => {
       switchCompetition(competitions[0].id);
     }
   }, [searchParams, activeCompetitionId, competitions, switchCompetition]);
+
+  useEffect(() => {
+    setCurrentRefereeSessionId(sessionId);
+  }, [sessionId, setCurrentRefereeSessionId]);
 
   useEffect(() => {
     if (!decisionEndsAt) return;

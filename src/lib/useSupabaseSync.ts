@@ -174,7 +174,8 @@ export function useSupabaseSync(
   refereeSignals: RefSignal[],
   callbacks: SyncCallbacks,
   deviceId: string,
-  readOnly = false
+  readOnly = false,
+  sessionId: string | null = null
 ) {
   const dbReadyRef = useRef(false);
   const lastSavedCompRef = useRef<string>("");
@@ -424,11 +425,11 @@ export function useSupabaseSync(
     async (position: number, signal: RefSignal) => {
       if (!isSupabaseConfigured || !activeCompetitionId) return;
       try {
-        await dbRefereeSignals.upsertSignal(activeCompetitionId, position, signal, deviceId);
+        await dbRefereeSignals.upsertSignal(activeCompetitionId, position, signal, deviceId, sessionId);
       } catch {
       }
     },
-    [activeCompetitionId, deviceId]
+    [activeCompetitionId, deviceId, sessionId]
   );
 
   const clearSignals = useCallback(async () => {

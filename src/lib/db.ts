@@ -59,6 +59,9 @@ export type DbRefereeSignal = {
   position: number;
   signal: string | null;
   device_id: string;
+  session_id: string | null;
+  last_updated_by_device_id: string | null;
+  submitted_at: string | null;
   updated_at: string;
 };
 
@@ -188,7 +191,13 @@ export const dbRefereeSignals = {
     return data ?? [];
   },
 
-  async upsertSignal(competitionId: string, position: number, signal: string | null, deviceId: string): Promise<void> {
+  async upsertSignal(
+    competitionId: string,
+    position: number,
+    signal: string | null,
+    deviceId: string,
+    sessionId?: string | null
+  ): Promise<void> {
     const { error } = await supabase
       .from("referee_signals")
       .upsert(
@@ -197,6 +206,9 @@ export const dbRefereeSignals = {
           position,
           signal,
           device_id: deviceId,
+          session_id: sessionId || null,
+          last_updated_by_device_id: deviceId,
+          submitted_at: signal ? new Date().toISOString() : null,
           updated_at: new Date().toISOString(),
         },
         { onConflict: "competition_id,position" }
