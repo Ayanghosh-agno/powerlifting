@@ -1260,6 +1260,10 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
+  const setCurrentRefereeSessionId = (sessionId: string | null) => {
+    setCurrentRefereeSessionIdState(sessionId);
+  };
+
   const startAttemptClock = useCallback(() => {
     if (!competitionStarted) setCompetitionStarted(true);
     setTimerState("ATTEMPT", Date.now() + ONE_MINUTE_MS);
