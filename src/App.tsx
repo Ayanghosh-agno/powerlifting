@@ -1515,7 +1515,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
         publishRefereeSignal: publishSignal,
         trackRefereePresence: trackPresence,
         untrackRefereePresence: untrackPresence,
-        setCurrentRefreeSessionId,
+        setCurrentRefereeSessionId,
       }}
     >
       {children}
