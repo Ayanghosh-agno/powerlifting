@@ -4267,31 +4267,15 @@ const GroupManagementPage = () => {
   );
 };
 
+
 const RefereePage = () => {
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const {
-    competitions,
-    activeCompetitionId,
-    switchCompetition,
-    lifters,
-    groups,
-    currentLifterId,
-    refereeSignals,
-    refereeInputLocked,
-    currentLift,
-    currentAttemptIndex,
-    competitionStarted,
-    includeCollars,
-    competitionMode,
-    timerPhase,
-    timerEndsAt,
-    nextAttemptQueue,
-    activeCompetitionGroupName,
-    resetSignals,
-    connectedRefereeSlots,
-  } = useAppContext();
-  const connectedCount = [connectedRefereeSlots.left, connectedRefereeSlots.center, connectedRefereeSlots.right].filter(Boolean).length;
+  const [view, setView] = useState<"panel" | "qr">("panel");
+  const { competitions, activeCompetitionId, switchCompetition } = useAppContext();
+  const [qrModal, setQrModal] = useState<{ slot: RefereeSlot; title: string; url: string; sessionId: string } | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
+  const [activeSession, setActiveSession] = useState<{ id: string; expires_at: string } | null>(null);
+  const [loadingSession, setLoadingSession] = useState(true);
 
   useEffect(() => {
     const requestedCompetitionId = searchParams.get("cid");
@@ -4302,12 +4286,6 @@ const RefereePage = () => {
       }
     }
   }, [searchParams, activeCompetitionId, competitions, switchCompetition]);
-
-  const [qrModal, setQrModal] = useState<{ slot: RefereeSlot; title: string; url: string; sessionId: string } | null>(null);
-  const [linkCopied, setLinkCopied] = useState(false);
-  const [sessionAction, setSessionAction] = useState<{ type: 'pending' | 'success'; action: 'create' | 'refresh' } | null>(null);
-  const [activeSession, setActiveSession] = useState<{ id: string; expires_at: string } | null>(null);
-  const [loadingSession, setLoadingSession] = useState(true);
 
   useEffect(() => {
     if (!activeCompetitionId) {
@@ -4339,55 +4317,13 @@ const RefereePage = () => {
     return () => window.removeEventListener("keydown", onKey);
   }, [qrModal]);
 
-  const getRefereeBootstrapPayload = (): PersistedState => ({
-    lifters,
-    groups,
-    currentLifterId,
-    refereeSignals,
-    refereeInputLocked,
-    currentLift,
-    currentAttemptIndex,
-    competitionStarted,
-    includeCollars,
-    competitionMode,
-    nextAttemptQueue,
-    timerPhase,
-    timerEndsAt,
-    activeCompetitionGroupName,
-  });
-
   const buildRefereeLink = (slot: RefereeSlot, sessionId?: string) => {
     const params = new URLSearchParams();
     if (activeCompetitionId) params.set("cid", activeCompetitionId);
     if (sessionId) params.set("session", sessionId);
     const queryString = params.toString();
     const url = `${window.location.origin}${window.location.pathname}#/signals/${slot}${queryString ? `?${queryString}` : ""}`;
-    return { url, seedValue: "" };
-  };
-
-  const openRefereeScreen = (slot: RefereeSlot, sessionId?: string) => {
-    const { url, seedValue } = buildRefereeLink(slot, sessionId);
-    const popup = window.open(url, "_blank", "width=900,height=700");
-    if (!popup) {
-      const fallbackParams = new URLSearchParams();
-      if (activeCompetitionId) fallbackParams.set("cid", activeCompetitionId);
-      if (sessionId) fallbackParams.set("session", sessionId);
-      if (seedValue) fallbackParams.set("seed", seedValue);
-      navigate(`/signals/${slot}${fallbackParams.toString() ? `?${fallbackParams.toString()}` : ""}`);
-      return;
-    }
-
-    const bootstrapPayload = getRefereeBootstrapPayload();
-
-    // Retry postMessage so referee popup gets state even on slow mobile webviews.
-    let tries = 0;
-    const postBootstrap = () => {
-      if (popup.closed || tries >= 8) return;
-      popup.postMessage({ type: "POWERLIFTING_BOOTSTRAP", payload: bootstrapPayload }, window.location.origin);
-      tries += 1;
-      window.setTimeout(postBootstrap, 250);
-    };
-    postBootstrap();
+    return url;
   };
 
   const openQrForSlot = async (slot: RefereeSlot, title: string) => {
@@ -4395,7 +4331,7 @@ const RefereePage = () => {
     try {
       if (!activeCompetitionId) return;
       const session = await dbRefereeSessions.create(activeCompetitionId);
-      const { url } = buildRefereeLink(slot, session.id);
+      const url = buildRefereeLink(slot, session.id);
       setQrModal({ slot, title, url, sessionId: session.id });
       setActiveSession(session);
     } catch (error) {
@@ -4416,268 +4352,93 @@ const RefereePage = () => {
 
   return (
     <section className="space-y-8">
-      <SectionHeader title="Referee Signals" path="/signals" />
-
-      <motion.div
-        className="grid grid-cols-1 gap-6 lg:grid-cols-3"
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-      >
-        {REFEREE_SLOT_CONFIG.map((slot, idx) => {
-          const signal = refereeSignals[slot.index];
-          const isConnected = connectedRefereeSlots[slot.key];
-          const signalColor = signal === "GOOD" ? "emerald" : signal === "NO" ? "red" : "slate";
-
-          return (
-            <motion.button
-              key={slot.key}
-              type="button"
-              onClick={() => openQrForSlot(slot.key, slot.label)}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: idx * 0.1, duration: 0.4 }}
-              whileHover={{ y: -4, transition: { duration: 0.2 } }}
-              className={`group relative overflow-hidden rounded-2xl border backdrop-blur-sm transition-all duration-300 ${
-                isConnected
-                  ? `border-emerald-400/40 bg-gradient-to-br from-emerald-500/15 to-emerald-600/5 hover:border-emerald-300/60 hover:from-emerald-500/25 hover:to-emerald-600/15`
-                  : `border-slate-600/40 bg-gradient-to-br from-slate-700/10 to-slate-800/10 hover:border-slate-500/60 hover:from-slate-700/20 hover:to-slate-800/20`
-              }`}
-            >
-              <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-
-              <div className="relative p-8 space-y-6">
-                <div>
-                  <p className="text-4xl font-bold bg-gradient-to-r from-white to-slate-200 bg-clip-text text-transparent">
-                    {slot.label}
-                  </p>
-                  <p className="mt-2 text-xs uppercase tracking-[0.15em] text-slate-400 font-medium">Referee Station</p>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <motion.div
-                    animate={{ scale: isConnected ? [1, 1.2, 1] : 1 }}
-                    transition={{ repeat: isConnected ? Infinity : 0, duration: 2 }}
-                    className={`h-2.5 w-2.5 rounded-full ${
-                      isConnected ? "bg-emerald-400 shadow-lg shadow-emerald-400/50" : "bg-slate-500"
-                    }`}
-                  />
-                  <span className={`text-xs font-semibold ${
-                    isConnected ? "text-emerald-300" : "text-slate-400"
-                  }`}>
-                    {isConnected ? "Connected" : "Offline"}
-                  </span>
-                </div>
-
-                <div className="h-24 w-full rounded-2xl border border-white/10 overflow-hidden flex items-center justify-center bg-gradient-to-br from-white/5 to-transparent">
-                  <motion.div
-                    animate={{
-                      scale: signal !== null ? [1, 1.05, 1] : 1,
-                      opacity: signal !== null ? 1 : 0.5
-                    }}
-                    transition={{ repeat: signal !== null ? Infinity : 0, duration: 2 }}
-                    className={`text-5xl font-bold transition-all duration-300 ${
-                      signal === "GOOD" ? "text-emerald-400" : signal === "NO" ? "text-red-400" : "text-slate-400"
-                    }`}
-                  >
-                    {signal === "GOOD" ? "✓" : signal === "NO" ? "✕" : "–"}
-                  </motion.div>
-                </div>
-
-                <div className="pt-2 border-t border-white/5">
-                  <p className="text-sm font-semibold text-slate-200">{signal ?? "Awaiting Signal"}</p>
-                  <p className="text-xs text-slate-500 mt-1">Tap to share QR code</p>
-                </div>
-              </div>
-            </motion.button>
-          );
-        })}
-      </motion.div>
-
-      <motion.div
-        className="rounded-3xl border border-slate-600/30 bg-gradient-to-br from-slate-900/50 to-slate-800/30 backdrop-blur-xl p-8"
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.3, duration: 0.5 }}
-      >
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h2 className="text-2xl font-bold text-white mb-1">Session Management</h2>
-            <p className="text-sm text-slate-400">Manage referee connections and sessions</p>
-          </div>
-          <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-500/15 border border-emerald-400/30">
-            <div className="h-2 w-2 rounded-full bg-emerald-400" />
-            <span className="text-sm font-semibold text-emerald-300">{connectedCount} / 3 Connected</span>
-          </div>
-        </div>
-
-        {!loadingSession && activeSession && (
-          <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="mb-6 rounded-xl px-4 py-3 bg-blue-500/15 border border-blue-400/30 backdrop-blur-sm"
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs uppercase tracking-wider text-blue-300 font-semibold">Active Session</p>
-                <p className="mt-1 text-sm font-mono text-blue-200 break-all">{activeSession.id}</p>
-              </div>
-              <div className="text-right">
-                <p className="text-xs text-blue-400">Expires at</p>
-                <p className="text-sm font-semibold text-blue-200">
-                  {new Date(activeSession.expires_at).toLocaleTimeString()}
-                </p>
-              </div>
-            </div>
-          </motion.div>
-        )}
-
-        {sessionAction && (
-          <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            className={`mb-6 flex items-center gap-3 rounded-xl px-4 py-3 backdrop-blur-sm border ${
-              sessionAction.type === 'pending'
-                ? 'bg-blue-500/15 text-blue-300 border-blue-400/30'
-                : 'bg-emerald-500/15 text-emerald-300 border-emerald-400/30'
+      <div className="flex items-center justify-between mb-6">
+        <SectionHeader title="Referee Signals" path="/signals" />
+        <div className="flex gap-2">
+          <button
+            onClick={() => setView("panel")}
+            className={`px-4 py-2 rounded-lg font-semibold transition-colors ${
+              view === "panel"
+                ? "bg-cyan-600 text-white"
+                : "bg-slate-700 text-slate-300 hover:bg-slate-600"
             }`}
           >
-            {sessionAction.type === 'pending' ? (
-              <>
-                <motion.svg
-                  animate={{ rotate: 360 }}
-                  transition={{ repeat: Infinity, duration: 1 }}
-                  className="h-4 w-4 flex-shrink-0"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                >
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </motion.svg>
-                <span className="text-sm font-medium flex-1">
-                  {sessionAction.action === 'create' ? 'Creating new session...' : 'Invalidating all sessions...'}
-                </span>
-              </>
-            ) : (
-              <>
-                <svg className="h-4 w-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                </svg>
-                <span className="text-sm font-medium flex-1">
-                  {sessionAction.action === 'create' ? 'Session created & copied!' : 'All sessions cleared!'}
-                </span>
-              </>
-            )}
-          </motion.div>
-        )}
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <motion.button
-            onClick={async () => {
-              if (sessionAction?.type === 'pending') return;
-              setSessionAction({ type: 'pending', action: 'create' });
-              try {
-                const session = await dbRefereeSessions.create(activeCompetitionId || "");
-                setActiveSession(session);
-                const link = `${window.location.origin}/#/signals/left?session=${session.id}&cid=${encodeURIComponent(activeCompetitionId || "")}`;
-                console.log("New session created:", session.id);
-                await navigator.clipboard.writeText(link);
-                setSessionAction({ type: 'success', action: 'create' });
-                setTimeout(() => setSessionAction(null), 2500);
-              } catch (error) {
-                console.error("Failed to create session:", error);
-                setSessionAction(null);
-              }
-            }}
-            disabled={sessionAction?.type === 'pending'}
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-            className="relative group rounded-xl bg-gradient-to-r from-cyan-500 to-cyan-600 px-6 py-3 font-semibold text-black hover:from-cyan-400 hover:to-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex items-center justify-center gap-2 overflow-hidden"
+            Test Panel
+          </button>
+          <button
+            onClick={() => setView("qr")}
+            className={`px-4 py-2 rounded-lg font-semibold transition-colors ${
+              view === "qr"
+                ? "bg-cyan-600 text-white"
+                : "bg-slate-700 text-slate-300 hover:bg-slate-600"
+            }`}
           >
-            <div className="absolute inset-0 bg-white/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-            {sessionAction?.type === 'pending' && sessionAction.action === 'create' ? (
-              <>
-                <motion.svg
-                  animate={{ rotate: 360 }}
-                  transition={{ repeat: Infinity, duration: 1 }}
-                  className="relative h-4 w-4"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                >
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </motion.svg>
-                Creating session...
-              </>
-            ) : (
-              <>
-                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-                Create New Session
-              </>
-            )}
-          </motion.button>
-
-          <motion.button
-            onClick={async () => {
-              if (sessionAction?.type === 'pending') return;
-              setSessionAction({ type: 'pending', action: 'refresh' });
-              try {
-                await dbRefereeSessions.deleteAll(activeCompetitionId || "");
-                setActiveSession(null);
-                resetSignals();
-                setSessionAction({ type: 'success', action: 'refresh' });
-                setTimeout(() => setSessionAction(null), 2500);
-              } catch (error) {
-                console.error("Failed to delete sessions:", error);
-                setSessionAction(null);
-              }
-            }}
-            disabled={sessionAction?.type === 'pending'}
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-            className="relative group rounded-xl border border-white/20 bg-white/5 hover:bg-white/10 backdrop-blur-sm px-6 py-3 font-semibold text-white disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex items-center justify-center gap-2 overflow-hidden"
-          >
-            <div className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-            {sessionAction?.type === 'pending' && sessionAction.action === 'refresh' ? (
-              <>
-                <motion.svg
-                  animate={{ rotate: 360 }}
-                  transition={{ repeat: Infinity, duration: 1 }}
-                  className="relative h-4 w-4"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                >
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </motion.svg>
-                Invalidating...
-              </>
-            ) : (
-              <>
-                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-                Invalidate All
-              </>
-            )}
-          </motion.button>
+            QR Mode
+          </button>
         </div>
-      </motion.div>
+      </div>
 
-      <motion.button
-        onClick={resetSignals}
-        whileHover={{ scale: 1.02 }}
-        whileTap={{ scale: 0.98 }}
-        className="w-full rounded-xl border border-slate-600/30 bg-slate-900/50 hover:bg-slate-900/80 backdrop-blur-sm px-6 py-4 font-semibold text-white transition-all duration-200 flex items-center justify-center gap-2"
-      >
-        <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-        </svg>
-        Reset All Signals
-      </motion.button>
+      {view === "panel" ? (
+        <RefereePanelTab />
+      ) : (
+        <motion.div
+          className="grid grid-cols-1 gap-6 lg:grid-cols-3"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+        >
+          {REFEREE_SLOT_CONFIG.map((slot, idx) => {
+            const isConnected = connectedRefereeSlots[slot.key];
+
+            return (
+              <motion.button
+                key={slot.key}
+                type="button"
+                onClick={() => openQrForSlot(slot.key, slot.label)}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: idx * 0.1, duration: 0.4 }}
+                whileHover={{ y: -4, transition: { duration: 0.2 } }}
+                className={`group relative overflow-hidden rounded-2xl border backdrop-blur-sm transition-all duration-300 ${
+                  isConnected
+                    ? `border-emerald-400/40 bg-gradient-to-br from-emerald-500/15 to-emerald-600/5 hover:border-emerald-300/60 hover:from-emerald-500/25 hover:to-emerald-600/15`
+                    : `border-slate-600/40 bg-gradient-to-br from-slate-700/10 to-slate-800/10 hover:border-slate-500/60 hover:from-slate-700/20 hover:to-slate-800/20`
+                }`}
+              >
+                <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+
+                <div className="relative p-8 space-y-6">
+                  <div>
+                    <p className="text-4xl font-bold bg-gradient-to-r from-white to-slate-200 bg-clip-text text-transparent">
+                      {slot.label}
+                    </p>
+                    <p className="mt-2 text-xs uppercase tracking-[0.15em] text-slate-400 font-medium">Referee Station</p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <motion.div
+                      animate={{ scale: isConnected ? [1, 1.2, 1] : 1 }}
+                      transition={{ repeat: isConnected ? Infinity : 0, duration: 2 }}
+                      className={`h-2.5 w-2.5 rounded-full ${
+                        isConnected ? "bg-emerald-400 shadow-lg shadow-emerald-400/50" : "bg-slate-500"
+                      }`}
+                    />
+                    <span className={`text-xs font-semibold ${
+                      isConnected ? "text-emerald-300" : "text-slate-400"
+                    }`}>
+                      {isConnected ? "Connected" : "Offline"}
+                    </span>
+                  </div>
+
+                  <div className="pt-2 border-t border-white/5">
+                    <p className="text-xs uppercase tracking-wider text-slate-400">Tap for QR code</p>
+                  </div>
+                </div>
+              </motion.button>
+            );
+          })}
+        </motion.div>
+      )}
 
       {qrModal ? (
         <motion.div
@@ -4715,20 +4476,10 @@ const RefereePage = () => {
             <div className="flex flex-col gap-3">
               <motion.button
                 type="button"
-                onClick={() => openRefereeScreen(qrModal.slot, qrModal.sessionId)}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                className="rounded-xl bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-400 hover:to-cyan-500 py-3 text-sm font-semibold text-black transition-all duration-200"
-              >
-                Open in New Window
-              </motion.button>
-
-              <motion.button
-                type="button"
                 onClick={() => void copyRefereeLink()}
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
-                className="rounded-xl border border-white/20 bg-white/5 hover:bg-white/10 py-3 text-sm font-semibold text-white transition-all duration-200"
+                className="rounded-xl bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-400 hover:to-cyan-500 py-3 text-sm font-semibold text-black transition-all duration-200"
               >
                 {linkCopied ? "✓ Link Copied" : "Copy Link"}
               </motion.button>
@@ -4783,7 +4534,6 @@ const RefereeStationPage = () => {
       return;
     }
 
-    // If station opens directly on another device, auto-load first competition.
     if (!activeCompetitionId && competitions.length > 0) {
       switchCompetition(competitions[0].id);
     }
@@ -4915,33 +4665,6 @@ const RefereeStationPage = () => {
       setDecisionEndsAt(null);
     }, REFEREE_CONFIRM_DELAY_MS);
   };
-
-  if (!config) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[#05070f] text-white">
-        <InvalidSessionError title="Invalid Station" message="The referee station URL is invalid. Please check your link and try again." />
-      </div>
-    );
-  }
-
-  if (isLoading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[#05070f] text-white">
-        <div className="text-center">
-          <Spinner />
-          <p className="mt-4 text-slate-300">Validating session...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (error || !isValid) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[#05070f] text-white">
-        <InvalidSessionError title="Invalid Session" message={error || "This referee session is no longer valid. Please request a new link from the coordinator."} />
-      </div>
-    );
-  }
 
   const countdown = decisionEndsAt ? Math.max(0, (decisionEndsAt - now) / 1000) : 0;
   const currentSignal = refereeSignals[config.index];
