@@ -215,6 +215,21 @@ const getGroupSortOrder = (groupName: string): number => {
   return 100;
 };
 
+// IPF Goodlift points coefficients (Classic Raw / Powerlifting total)
+const GOODLIFT_COEFFICIENTS: Record<"Male" | "Female", { a: number; b: number; c: number }> = {
+  Male: { a: 1199.72839, b: 1025.18162, c: 0.00921 },
+  Female: { a: 610.32796, b: 1045.59282, c: 0.03048 },
+};
+
+const calculateGoodliftPoints = (total: number, bodyweight: number | "", sex: "Male" | "Female"): number => {
+  if (!(typeof bodyweight === "number" && Number.isFinite(bodyweight) && bodyweight > 0)) return 0;
+  if (!(Number.isFinite(total) && total > 0)) return 0;
+  const { a, b, c } = GOODLIFT_COEFFICIENTS[sex];
+  const denominator = a - b * Math.exp(-c * bodyweight);
+  if (!Number.isFinite(denominator) || denominator <= 0) return 0;
+  return Number(((total * 100) / denominator).toFixed(2));
+};
+
 const REFEREE_SLOT_CONFIG: { key: RefereeSlot; label: string; index: number }[] = [
   { key: "left", label: "Left", index: 0 },
   { key: "center", label: "Center", index: 1 },
@@ -5237,7 +5252,7 @@ const ResultsPage = () => {
           const bench = bestLift(l.benchAttempts);
           const deadlift = bestLift(l.deadliftAttempts);
           const total = squat + bench + deadlift;
-          const glPoints = l.bodyweight && total ? Number(((total / Number(l.bodyweight)) * 10).toFixed(2)) : 0;
+          const glPoints = calculateGoodliftPoints(total, l.bodyweight, l.sex);
           return { ...l, squat, bench, deadlift, total, glPoints };
         })
         .sort((a, b) => b.glPoints - a.glPoints),
@@ -5429,6 +5444,15 @@ const ResultsTable = memo(({
     return trimmed.replace(/\s+\d+(\.\d+)?\s*KG$/i, "").trim();
   };
 
+  const matchesCategoryToClass = (categoryPart: string, classCategory: string) => {
+    const part = categoryPart.toLowerCase().trim();
+    const cls = classCategory.toLowerCase().trim();
+    if (!part || !cls) return false;
+    if (part === cls || part.includes(cls) || cls.includes(part)) return true;
+    const tokens = part.split(/\s+/).filter((token) => token.length > 2);
+    return tokens.some((token) => cls.includes(token));
+  };
+
   const renderLifterRow = (lifter: RankedLifter, idx: number, groupName?: string) => {
     const isDual = isDualCategory(lifter.category);
 
@@ -5436,8 +5460,8 @@ const ResultsTable = memo(({
     if (isDual && groupName !== undefined) {
       const [firstPart, secondPart] = getDualCategoryParts(lifter.category);
       const classCategory = categoryFromClassName(groupName).toLowerCase();
-      const firstMatch = classCategory === firstPart.toLowerCase();
-      const secondMatch = classCategory === secondPart.toLowerCase();
+      const firstMatch = matchesCategoryToClass(firstPart, classCategory);
+      const secondMatch = matchesCategoryToClass(secondPart, classCategory);
 
       if (!firstMatch && secondMatch) {
         displayCategory = secondPart;
@@ -5571,6 +5595,7 @@ const DisplayFullPage = () => {
     currentLifterId,
     setCurrentLifterId,
     refereeSignals,
+    resetSignals,
     currentLift,
     currentAttemptIndex,
     competitionStarted,
@@ -5590,12 +5615,12 @@ const DisplayFullPage = () => {
   const forceLive = searchParams.get("live") === "1";
   const [showSignalOverlay, setShowSignalOverlay] = useState(false);
   const [displaySignals, setDisplaySignals] = useState<RefSignal[]>([null, null, null]);
-  const [overlayPhase, setOverlayPhase] = useState<"circles" | "lift" | null>(null);
+  const [overlayPhase, setOverlayPhase] = useState<"circles" | "lift" | "no-lift" | null>(null);
   const [isFinalVerdictAnimating, setIsFinalVerdictAnimating] = useState(false);
   const [displayTheme, setDisplayTheme] = useState<DisplayThemeKey>("black");
   const prevSignalsRef = useRef<string>("");
-  const overlayHideTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const overlayPhaseTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const overlayHideTimeoutRef = useRef<number | null>(null);
+  const overlayPhaseTimeoutRef = useRef<number | null>(null);
 
   const cycleDisplayTheme = () => {
     setDisplayTheme((prev) => {
@@ -5673,13 +5698,7 @@ const DisplayFullPage = () => {
           setShowSignalOverlay(false);
           setDisplaySignals([null, null, null]);
 
-          try {
-            await clearSignals();
-          } catch (error) {
-            console.error("Failed to clear signals:", error);
-          }
-
-          setRefereeSignals([null, null, null]);
+          resetSignals();
           setIsFinalVerdictAnimating(false);
         };
 
@@ -5698,7 +5717,7 @@ const DisplayFullPage = () => {
       }
     }
     return undefined;
-  }, [refereeSignals, isFinalVerdictAnimating]);
+  }, [refereeSignals, isFinalVerdictAnimating, resetSignals]);
 
   useEffect(() => {
     return () => {
@@ -5711,19 +5730,29 @@ const DisplayFullPage = () => {
     };
   }, []);
 
+  const competitionScopedLifters = useMemo(
+    () =>
+      activeCompetitionGroupName !== null
+        ? lifters.filter((l) => isInGroup(l.group, activeCompetitionGroupName))
+        : lifters,
+    [lifters, activeCompetitionGroupName],
+  );
+
+  const rankingSourceLifters = displayMode === "results_all" ? lifters : competitionScopedLifters;
+
   const ranking = useMemo(
     () =>
-      [...lifters]
+      [...rankingSourceLifters]
         .map((l) => {
           const squat = bestLift(l.squatAttempts);
           const bench = bestLift(l.benchAttempts);
           const deadlift = bestLift(l.deadliftAttempts);
           const total = squat + bench + deadlift;
-          const points = l.bodyweight && total ? Number(((total / Number(l.bodyweight)) * 10).toFixed(2)) : 0;
+          const points = calculateGoodliftPoints(total, l.bodyweight, l.sex);
           return { ...l, total, points };
         })
         .sort((a, b) => b.points - a.points),
-    [lifters],
+    [rankingSourceLifters],
   );
 
   const isDualCategory = (category: string) => category.includes(" + ");
@@ -5765,13 +5794,7 @@ const DisplayFullPage = () => {
     [ranking],
   );
 
-  const displaySessionLifters = useMemo(
-    () =>
-      activeCompetitionGroupName !== null
-        ? lifters.filter((l) => isInGroup(l.group, activeCompetitionGroupName))
-        : lifters,
-    [lifters, activeCompetitionGroupName],
-  );
+  const displaySessionLifters = competitionScopedLifters;
 
   const orderedByCurrentRound = useMemo(
     () => orderLiftersByIPF(displaySessionLifters, currentLift, currentAttemptIndex),
