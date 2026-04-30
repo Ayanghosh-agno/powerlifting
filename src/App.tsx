@@ -31,6 +31,7 @@ import {
   type PersistedState,
 } from "./lib/types";
 import { initializeStateManager } from "./lib/stateManager";
+import { isSupabaseConfigured } from "./lib/supabase";
 import { useRefereSessionValidation } from "./hooks/useRefereSessionValidation";
 import { InvalidSessionError } from "./components/InvalidSessionError";
 import { dbRefereeSessions } from "./lib/db";
@@ -725,7 +726,9 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
   const [competitionMode, setCompetitionModeState] = useState<CompetitionMode>("FULL_GAME");
   const [nextAttemptQueue, setNextAttemptQueueState] = useState<NextAttemptEntry[]>([]);
   const [activeCompetitionGroupName, setActiveCompetitionGroupNameState] = useState<string | null>(null);
+  const [, setCurrentRefereeSessionIdState] = useState<string | null>(null);
   const [currentRefreeSessionId, setCurrentRefreeSessionIdState] = useState<string | null>(null);
+  const stageKeyRef = useRef<string>("");
 
   const onCompetitionsLoaded = useCallback((loadedComps: CompetitionRecord[]) => {
     if (loadedComps.length === 0) return;
@@ -1458,14 +1461,24 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     } else {
       clearTimerState();
     }
-    if (overlayHideTimeoutRef.current) {
-      window.clearTimeout(overlayHideTimeoutRef.current);
-    }
-    overlayHideTimeoutRef.current = window.setTimeout(() => {
-      resetSignals();
-      overlayHideTimeoutRef.current = null;
-    }, RESULT_OVERLAY_DISPLAY_MS + 500);
+    // Reset immediately after verdict so next lifter starts with a clean signal slate.
+    // The display screen keeps its own local overlay state, so this won't interrupt animations.
+    resetSignals();
   }, [lifters, currentLifterId, refereeSignals, currentLift, currentAttemptIndex, activeCompetitionGroupName, nextAttemptQueue, competitionMode, setLifters, setCurrentLift, setCurrentAttemptIndex, setCurrentLifterId, setNextAttemptQueueState, broadcast, startNextAttemptClock, clearTimerState, resetSignals]);
+
+  useEffect(() => {
+    const stageKey = `${currentLifterId ?? "none"}|${currentLift}|${currentAttemptIndex}`;
+    if (!stageKeyRef.current) {
+      stageKeyRef.current = stageKey;
+      return;
+    }
+    if (stageKeyRef.current === stageKey) return;
+    stageKeyRef.current = stageKey;
+    if (refereeSignals.some((signal) => signal !== null)) {
+      // Defensive clear for race conditions where previous-stage signals arrive late.
+      resetSignals();
+    }
+  }, [currentLifterId, currentLift, currentAttemptIndex, refereeSignals, resetSignals]);
 
   return (
     <AppContext.Provider
@@ -2825,7 +2838,7 @@ const LifterManagementPage = () => {
       return;
     }
     if (!form.group || !groups.some((g) => g.name === form.group)) {
-      setForm((prev) => ({ ...prev, group: groups[0].name }));
+      setForm((prev) => ({ ...prev, group: groups[0]?.name ?? "" }));
     }
   }, [groups, form.group]);
 
@@ -3498,8 +3511,9 @@ const GroupManagementPage = () => {
 
   useEffect(() => {
     if (!groups.length) { setSelectedGroupName(""); setBulkTargetGroupName(""); return; }
-    if (!selectedGroupName || !groups.some((g) => g.name === selectedGroupName)) setSelectedGroupName(groups[0].name);
-    if (!bulkTargetGroupName || !groups.some((g) => g.name === bulkTargetGroupName)) setBulkTargetGroupName(groups[0].name);
+    const firstGroupName = groups[0]?.name ?? "";
+    if (!selectedGroupName || !groups.some((g) => g.name === selectedGroupName)) setSelectedGroupName(firstGroupName);
+    if (!bulkTargetGroupName || !groups.some((g) => g.name === bulkTargetGroupName)) setBulkTargetGroupName(firstGroupName);
   }, [groups, selectedGroupName, bulkTargetGroupName]);
 
   useEffect(() => {
@@ -3817,7 +3831,7 @@ const GroupManagementPage = () => {
               )}
             </div>
           )}
-          {groups.length === 0 && suggestedGroupNames.length === 0 && (
+          {groups.length === 0 && (
             <p className="mt-4 text-sm text-slate-500">No groups yet. Create one above or suggest by weight class.</p>
           )}
         </div>
@@ -3919,7 +3933,7 @@ const GroupManagementPage = () => {
                 <div className="flex flex-wrap items-center gap-3 p-4">
                   <div className="flex min-w-0 flex-1 items-center gap-3">
                     <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-white/10 text-sm font-bold text-white">
-                      {group.name.charAt(0)}
+                      {(group.name || "?").charAt(0)}
                     </div>
                     <div className="min-w-0">
                       {isEditingThis ? (
@@ -3999,9 +4013,12 @@ const GroupManagementPage = () => {
                       <div className="mx-4 mb-4 rounded-xl border border-red-500/30 bg-red-900/20 p-4">
                         <p className="mb-3 text-sm text-red-200">
                           Delete Group <strong>{group.name}</strong>?{" "}
-                          {groups.find((g) => g.id !== group.id)
-                            ? `${groupLifterCount} lifter(s) will be moved to Group ${groups.find((g) => g.id !== group.id)!.name}.`
-                            : `${groupLifterCount} lifter(s) will become ungrouped.`}
+                          {(() => {
+                            const fallback = groups.find((g) => g.id !== group.id);
+                            return fallback
+                              ? `${groupLifterCount} lifter(s) will be moved to Group ${fallback.name}.`
+                              : `${groupLifterCount} lifter(s) will become ungrouped.`;
+                          })()}
                         </p>
                         <div className="flex gap-2">
                           <button onClick={() => deleteGroup(group)} className="rounded-lg bg-red-500 px-4 py-2 text-xs font-semibold text-white hover:bg-red-400">Confirm Delete</button>
@@ -4268,10 +4285,93 @@ const GroupManagementPage = () => {
 };
 
 
+const RefereePanelTab = () => {
+  const { refereeSignals, setRefereeSignals, applyRefereeDecision, resetSignals, connectedRefereeSlots } = useAppContext();
+
+  const setSlotSignal = (slotIndex: number, signal: RefSignal) => {
+    const next = [...refereeSignals];
+    next[slotIndex] = signal;
+    setRefereeSignals(next);
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        {REFEREE_SLOT_CONFIG.map((slot) => {
+          const signal = refereeSignals[slot.index];
+          const isConnected = connectedRefereeSlots[slot.key];
+          return (
+            <div key={slot.key} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+              <div className="mb-4 flex items-center justify-between">
+                <p className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-200">{slot.label}</p>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest ${
+                    isConnected ? "bg-emerald-500/20 text-emerald-300" : "bg-slate-500/20 text-slate-400"
+                  }`}
+                >
+                  {isConnected ? "Connected" : "Offline"}
+                </span>
+              </div>
+
+              <div className="mb-4 rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-center">
+                <p className="text-[10px] uppercase tracking-widest text-slate-400">Current Signal</p>
+                <p className="mt-1 text-base font-black uppercase">
+                  {signal === "GOOD" ? "GOOD" : signal === "NO" ? "NO" : "PENDING"}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSlotSignal(slot.index, "GOOD")}
+                  className="rounded-lg bg-emerald-500/20 px-2 py-2 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/30"
+                >
+                  GOOD
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSlotSignal(slot.index, "NO")}
+                  className="rounded-lg bg-rose-500/20 px-2 py-2 text-xs font-semibold text-rose-200 hover:bg-rose-500/30"
+                >
+                  NO
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSlotSignal(slot.index, null)}
+                  className="rounded-lg bg-white/10 px-2 py-2 text-xs font-semibold text-slate-200 hover:bg-white/15"
+                >
+                  CLEAR
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => applyRefereeDecision()}
+          className="rounded-xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-black hover:bg-cyan-400"
+        >
+          Apply Decision
+        </button>
+        <button
+          type="button"
+          onClick={resetSignals}
+          className="rounded-xl bg-white/10 px-4 py-2 text-sm font-semibold text-slate-100 hover:bg-white/15"
+        >
+          Reset Signals
+        </button>
+      </div>
+    </div>
+  );
+};
+
 const RefereePage = () => {
   const [searchParams] = useSearchParams();
   const [view, setView] = useState<"panel" | "qr">("panel");
-  const { competitions, activeCompetitionId, switchCompetition } = useAppContext();
+  const { competitions, activeCompetitionId, switchCompetition, connectedRefereeSlots } = useAppContext();
   const [qrModal, setQrModal] = useState<{ slot: RefereeSlot; title: string; url: string; sessionId: string } | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
   const [activeSession, setActiveSession] = useState<{ id: string; expires_at: string } | null>(null);
@@ -4330,12 +4430,19 @@ const RefereePage = () => {
     setLinkCopied(false);
     try {
       if (!activeCompetitionId) return;
+      if (!isSupabaseConfigured) {
+        const url = buildRefereeLink(slot);
+        setQrModal({ slot, title, url, sessionId: "offline" });
+        return;
+      }
       const session = await dbRefereeSessions.create(activeCompetitionId);
       const url = buildRefereeLink(slot, session.id);
       setQrModal({ slot, title, url, sessionId: session.id });
       setActiveSession(session);
     } catch (error) {
       console.error("Failed to create referee session:", error);
+      const fallbackUrl = buildRefereeLink(slot);
+      setQrModal({ slot, title, url: fallbackUrl, sessionId: "fallback" });
     }
   };
 
@@ -5316,34 +5423,21 @@ const ResultsTable = memo(({
     return [category.slice(0, idx).trim(), category.slice(idx + 3).trim()];
   };
 
+  const categoryFromClassName = (className?: string) => {
+    if (!className) return "";
+    const trimmed = className.trim();
+    return trimmed.replace(/\s+\d+(\.\d+)?\s*KG$/i, "").trim();
+  };
+
   const renderLifterRow = (lifter: RankedLifter, idx: number, groupName?: string) => {
     const isDual = isDualCategory(lifter.category);
-
-    let isGuest = false;
-    if (isDual && groupName !== undefined) {
-      const [firstPart, secondPart] = getDualCategoryParts(lifter.category);
-      const groupNameUpper = groupName.toUpperCase();
-      const firstKeyword = firstPart.toUpperCase().split(" ")[0];
-      const secondKeyword = secondPart.toUpperCase().split(" ")[0];
-      const assignedGroupUpper = (Array.isArray(lifter.group) ? lifter.group[0] : lifter.group).toUpperCase();
-
-      const firstMatch = groupNameUpper.includes(firstKeyword);
-      const secondMatch = groupNameUpper.includes(secondKeyword);
-      const primaryGroupMatch = assignedGroupUpper.toUpperCase().includes(firstKeyword);
-
-      isGuest = secondMatch && !primaryGroupMatch;
-    }
 
     let displayCategory = lifter.category || "-";
     if (isDual && groupName !== undefined) {
       const [firstPart, secondPart] = getDualCategoryParts(lifter.category);
-      const groupNameLower = groupName.toLowerCase();
-
-      const firstKeywords = firstPart.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
-      const secondKeywords = secondPart.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
-
-      const firstMatch = firstKeywords.some((kw) => groupNameLower.includes(kw));
-      const secondMatch = secondKeywords.some((kw) => groupNameLower.includes(kw));
+      const classCategory = categoryFromClassName(groupName).toLowerCase();
+      const firstMatch = classCategory === firstPart.toLowerCase();
+      const secondMatch = classCategory === secondPart.toLowerCase();
 
       if (!firstMatch && secondMatch) {
         displayCategory = secondPart;
@@ -5357,12 +5451,12 @@ const ResultsTable = memo(({
     return (
       <tr
         key={`${lifter.id}-${groupName ?? "ungrouped"}`}
-        className={`border-t border-white/8 ${lifter.id === currentLifterId ? "bg-cyan-500/10" : idx % 2 === 0 ? "" : isDarkTheme ? "bg-white/[0.015]" : "bg-black/[0.02]"} ${isGuest ? isDarkTheme ? "opacity-80" : "opacity-75" : ""}`}
+        className={`border-t border-white/8 ${lifter.id === currentLifterId ? "bg-cyan-500/10" : idx % 2 === 0 ? "" : isDarkTheme ? "bg-white/[0.015]" : "bg-black/[0.02]"}`}
       >
         <td className="px-3 py-2 text-slate-400">{idx + 1}</td>
         <td className="px-3 py-2 font-semibold">
           <span>{lifter.name || "-"}</span>
-          {isGuest && (
+          {isDual && (
             <span className="ml-1.5 rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300">DUAL</span>
           )}
         </td>
@@ -5497,6 +5591,7 @@ const DisplayFullPage = () => {
   const [showSignalOverlay, setShowSignalOverlay] = useState(false);
   const [displaySignals, setDisplaySignals] = useState<RefSignal[]>([null, null, null]);
   const [overlayPhase, setOverlayPhase] = useState<"circles" | "lift" | null>(null);
+  const [isFinalVerdictAnimating, setIsFinalVerdictAnimating] = useState(false);
   const [displayTheme, setDisplayTheme] = useState<DisplayThemeKey>("black");
   const prevSignalsRef = useRef<string>("");
   const overlayHideTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -5532,6 +5627,8 @@ const DisplayFullPage = () => {
   const currentLifter = lifters.find((l) => l.id === currentLifterId) ?? sortedLifters[0] ?? null;
   const currentWeight = currentLifter ? resolveAttemptWeight(currentLifter, currentLift, currentAttemptIndex) : 20;
   const loadingWeight = currentWeight;
+  const receivedSignalCount = displaySignals.filter((signal) => signal !== null).length;
+  const liveReceivedSignalCount = refereeSignals.filter((signal) => signal !== null).length;
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
@@ -5560,8 +5657,12 @@ const DisplayFullPage = () => {
       setDisplaySignals(refereeSignals);
 
       if (!allSignalsReceived) {
+        if (isFinalVerdictAnimating) return;
+        setOverlayPhase(null);
         setShowSignalOverlay(true);
       } else {
+        setIsFinalVerdictAnimating(true);
+        setShowSignalOverlay(false);
         const allGood = refereeSignals.every((s) => s === "GOOD");
 
         if (overlayPhaseTimeoutRef.current) window.clearTimeout(overlayPhaseTimeoutRef.current);
@@ -5579,6 +5680,7 @@ const DisplayFullPage = () => {
           }
 
           setRefereeSignals([null, null, null]);
+          setIsFinalVerdictAnimating(false);
         };
 
         if (allGood) {
@@ -5596,7 +5698,7 @@ const DisplayFullPage = () => {
       }
     }
     return undefined;
-  }, [refereeSignals]);
+  }, [refereeSignals, isFinalVerdictAnimating]);
 
   useEffect(() => {
     return () => {
@@ -5631,33 +5733,28 @@ const DisplayFullPage = () => {
     return [category.slice(0, idx).trim(), category.slice(idx + 3).trim()];
   };
 
+  const getScoreboardClasses = (lifter: RankedLifter): string[] => {
+    const category = (lifter.category || "").trim();
+    const weightClass = (lifter.weightClass || "").trim();
+    if (!category) {
+      return weightClass ? [`Unclassified ${weightClass} KG`] : ["Unclassified"];
+    }
+
+    const categories = isDualCategory(category) ? getDualCategoryParts(category) : [category];
+    return categories.map((part) => (weightClass ? `${part} ${weightClass} KG` : part));
+  };
+
   const allGroupNames = useMemo(() => {
     const seen = new Set<string>();
-    lifters.forEach((l) => {
-      if (l.group) {
-        if (Array.isArray(l.group)) {
-          l.group.forEach((g) => seen.add(g));
-        } else {
-          seen.add(l.group);
-        }
-      }
+    ranking.forEach((lifter) => {
+      getScoreboardClasses(lifter).forEach((className) => seen.add(className));
     });
-    return Array.from(seen).sort((a, b) => getGroupSortOrder(a) - getGroupSortOrder(b));
-  }, [lifters]);
+    return Array.from(seen).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  }, [ranking]);
 
   const rankingByGroup = useMemo(() => {
     return allGroupNames.map((groupName) => {
-      const members = ranking.filter((l) => {
-        if (isInGroup(l.group, groupName)) return true;
-        if (isDualCategory(l.category)) {
-          const [firstPart, secondPart] = getDualCategoryParts(l.category);
-          const firstKeyword = firstPart.toUpperCase().split(" ")[0];
-          const secondKeyword = secondPart.toUpperCase().split(" ")[0];
-          const groupNameUpper = groupName.toUpperCase();
-          if (groupNameUpper.includes(firstKeyword) || groupNameUpper.includes(secondKeyword)) return true;
-        }
-        return false;
-      });
+      const members = ranking.filter((lifter) => getScoreboardClasses(lifter).includes(groupName));
       const sorted = [...members].sort((a, b) => b.points - a.points);
       return { groupName, members: sorted };
     });
@@ -5680,6 +5777,17 @@ const DisplayFullPage = () => {
     () => orderLiftersByIPF(displaySessionLifters, currentLift, currentAttemptIndex),
     [displaySessionLifters, currentLift, currentAttemptIndex],
   );
+  const currentOrderIndex = currentLifter ? orderedByCurrentRound.findIndex((lifter) => lifter.id === currentLifter.id) : -1;
+  const nextLifter =
+    currentOrderIndex >= 0
+      ? orderedByCurrentRound[currentOrderIndex + 1] ?? null
+      : orderedByCurrentRound[1] ?? null;
+  const nextLifterWeight =
+    nextLifter ? resolveAttemptWeight(nextLifter, currentLift, currentAttemptIndex) : null;
+  const nextLoadingWeight =
+    nextLifterWeight !== null
+      ? nextLifterWeight + (includeCollars ? COLLAR_PAIR_KG : 0)
+      : null;
 
   if (displayMode === "ipf_plate") {
     return (
@@ -5713,6 +5821,23 @@ const DisplayFullPage = () => {
           </div>
 
           <PlateStack weight={loadingWeight} includeCollars={includeCollars} />
+
+          {nextLifter && (
+            <div className="mx-auto mt-4 max-w-3xl rounded-xl border border-cyan-400/30 bg-cyan-900/15 px-4 py-3 text-left">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">Next Lifter</p>
+              <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-[clamp(1rem,2.4vw,1.6rem)] font-black uppercase text-cyan-100">{nextLifter.name || "-"}</p>
+                <p className="text-[clamp(1rem,2.2vw,1.5rem)] font-bold text-cyan-200">
+                  {nextLoadingWeight !== null ? `${nextLoadingWeight.toFixed(1)} kg` : "-"}
+                </p>
+              </div>
+              {nextLoadingWeight !== null && (
+                <div className="mt-3 rounded-lg border border-cyan-300/20 bg-black/25 p-2">
+                  <PlateStack weight={nextLoadingWeight} includeCollars={includeCollars} />
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <button
@@ -5728,7 +5853,6 @@ const DisplayFullPage = () => {
   // Viewport-fitted display screen — no page scroll, all content fits inside h-screen.
   if (["signal_results_plate", "signal_results", "order_attempts", "results_all"].includes(displayMode)) {
     const hasPlate = displayMode === "signal_results_plate";
-    const hasSignals = ["signal_results_plate", "signal_results"].includes(displayMode);
     return (
       <div
         className={`relative flex h-screen flex-col overflow-hidden ${activeTheme.rootClass}`}
@@ -5761,38 +5885,12 @@ const DisplayFullPage = () => {
           )}
         </div>
 
-        {/* ── Middle: plate + referee signal circles ── */}
-        {(hasPlate || hasSignals) && (
+        {/* ── Middle: plate section (template 1 only) ── */}
+        {hasPlate && (
           <div className="flex-none flex flex-wrap items-center gap-3 border-b border-white/10 px-3 py-2 md:px-5 md:py-3">
-            {hasPlate && (
-              <div className="flex-1 min-w-0">
-                <PlateStack weight={loadingWeight} includeCollars={includeCollars} />
-              </div>
-            )}
-            {hasSignals && (
-              <div className="flex flex-none items-center gap-3 md:gap-5">
-                {(() => {
-                  const allSignalsReceived = refereeSignals.every((s) => s !== null);
-
-                  return (
-                    <>
-                      {[0, 1, 2].map((idx) => (
-                        <div
-                          key={idx}
-                          className={`h-10 w-10 rounded-full border-2 transition-all duration-300 md:h-14 md:w-14 ${
-                            allSignalsReceived
-                              ? refereeSignals[idx] === "GOOD"
-                                ? "border-white bg-white shadow-[0_0_18px_rgba(255,255,255,0.8)]"
-                                : "border-red-500 bg-red-600 shadow-[0_0_18px_rgba(239,68,68,0.8)]"
-                              : "border-slate-500 bg-slate-600"
-                          }`}
-                        />
-                      ))}
-                    </>
-                  );
-                })()}
-              </div>
-            )}
+            <div className="flex-1 min-w-0">
+              <PlateStack weight={loadingWeight} includeCollars={includeCollars} />
+            </div>
           </div>
         )}
 
@@ -5886,6 +5984,29 @@ const DisplayFullPage = () => {
         </div>
 
         {/* ── IPF Good Lift: Phase 1 — 3 white circles (2 s) ── */}
+        {showSignalOverlay && !overlayPhase && !isFinalVerdictAnimating && liveReceivedSignalCount > 0 && liveReceivedSignalCount < 3 && (
+          <div className="pointer-events-none fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/90">
+            <div className="flex items-center gap-6 md:gap-10 lg:gap-14">
+              {Array.from({ length: receivedSignalCount }).map((_, idx) => (
+                <motion.div
+                  key={`incoming-signal-${idx}`}
+                  initial={{ scale: 0.65, opacity: 0 }}
+                  animate={{ scale: [1, 1.08, 1], opacity: [0.85, 1, 0.9] }}
+                  transition={{ duration: 1.05, repeat: Infinity, ease: "easeInOut", delay: idx * 0.08 }}
+                  className="h-20 w-20 rounded-full border-4 border-cyan-300 bg-cyan-500 shadow-[0_0_60px_rgba(34,211,238,0.85)] md:h-32 md:w-32 lg:h-44 lg:w-44"
+                />
+              ))}
+            </div>
+            <motion.p
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mt-8 text-[clamp(1rem,3vw,2.2rem)] font-black uppercase tracking-[0.3em] text-cyan-200"
+            >
+              SIGNAL{receivedSignalCount > 1 ? "S" : ""} RECEIVED
+            </motion.p>
+          </div>
+        )}
+
         {overlayPhase === "circles" && (
           <div className="pointer-events-none fixed inset-0 z-50 flex flex-col items-center justify-center bg-black">
             <div className="flex gap-6 md:gap-12 lg:gap-20">
