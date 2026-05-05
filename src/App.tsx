@@ -2646,7 +2646,7 @@ const LifterManagementPage = () => {
     bodyweight: "" as number | "",
     manualWeightClass: "",
     category: "Sub Junior Men",
-    group: groups[0]?.name ?? "",
+    group: "",
     team: "",
     rackHeightSquat: "" as number | "",
     rackHeightBench: "" as number | "",
@@ -2677,7 +2677,7 @@ const LifterManagementPage = () => {
       bodyweight: "",
       manualWeightClass: "",
       category: "Sub Junior Men",
-      group: groups[0]?.name ?? "",
+      group: "",
       team: "",
       rackHeightSquat: "",
       rackHeightBench: "",
@@ -2852,8 +2852,8 @@ const LifterManagementPage = () => {
       setForm((prev) => ({ ...prev, group: "" }));
       return;
     }
-    if (!form.group || !groups.some((g) => g.name === form.group)) {
-      setForm((prev) => ({ ...prev, group: groups[0]?.name ?? "" }));
+    if (form.group && !groups.some((g) => g.name === form.group)) {
+      setForm((prev) => ({ ...prev, group: "" }));
     }
   }, [groups, form.group]);
 
@@ -2914,11 +2914,9 @@ const LifterManagementPage = () => {
             onChange={(e) => setForm((prev) => ({ ...prev, group: e.target.value }))}
             className="h-11 rounded-xl border border-white/20 bg-black/40 px-3"
           >
-            {groups.length === 0 && (
-              <option value="" className="bg-slate-900">
-                No Group
-              </option>
-            )}
+            <option value="" className="bg-slate-900">
+              No group
+            </option>
             {groups.map((g) => (
               <option key={g.id} value={g.name} className="bg-slate-900">
                 {g.name}
