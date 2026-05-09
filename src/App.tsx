@@ -101,6 +101,7 @@ type StoredState = {
 
 const SYNC_KEY = "powerliftinglive.sync";
 const STORAGE_KEY = "powerliftinglive.state";
+const STORAGE_MIGRATION_FLAG_KEY = "powerliftinglive.storage-migrated.v2";
 const ONE_MINUTE_MS = 60_000;
 const REFEREE_CONFIRM_DELAY_MS = 1000;
 const RESULT_OVERLAY_DISPLAY_MS = 4000;
@@ -800,8 +801,20 @@ const useAuth = () => {
 };
 
 const AppProvider = ({ children }: { children: React.ReactNode }) => {
+  const { user } = useAuth();
   const isDisplayScreen = window.location.hash.startsWith("#/display/");
   const isDisplayScreenRef = useRef(isDisplayScreen);
+  const userScopedStorageKey = `${STORAGE_KEY}.${user?.id ?? "anon"}`;
+
+  useEffect(() => {
+    const alreadyMigrated = localStorage.getItem(STORAGE_MIGRATION_FLAG_KEY) === "1";
+    if (alreadyMigrated) return;
+
+    // Legacy key was shared across all users on this browser.
+    // Remove it once to avoid stale cross-user competition cache.
+    localStorage.removeItem(STORAGE_KEY);
+    localStorage.setItem(STORAGE_MIGRATION_FLAG_KEY, "1");
+  }, []);
   const seedAppliedRef = useRef(false);
   const relayClientIdRef = useRef(`relay-${Math.random().toString(36).slice(2, 10)}-${Date.now().toString(36)}`);
   const deviceIdRef = useRef(`device-${Math.random().toString(36).slice(2, 10)}-${Date.now().toString(36)}`);
@@ -991,7 +1004,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
+    const saved = localStorage.getItem(userScopedStorageKey);
     if (!saved) {
       hydrateCompetition(null);
       return;
@@ -1038,7 +1051,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     setCompetitionsState([migrated]);
     setActiveCompetitionIdState(migrated.id);
     hydrateCompetition(migrated);
-  }, []);
+  }, [userScopedStorageKey]);
 
   useEffect(() => {
     if (seedAppliedRef.current) return;
@@ -1147,13 +1160,13 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
 
   useEffect(() => {
     localStorage.setItem(
-      STORAGE_KEY,
+      userScopedStorageKey,
       JSON.stringify({
         competitions,
         activeCompetitionId,
       }),
     );
-  }, [competitions, activeCompetitionId]);
+  }, [competitions, activeCompetitionId, userScopedStorageKey]);
 
   useEffect(() => {
     const handler = socket.on("SYNC_STATE", (data: Partial<AppContextValue>) => {
