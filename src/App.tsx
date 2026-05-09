@@ -1650,6 +1650,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
 };
 
 const navItems: { to: string; label: string; requiresCompetition?: boolean; adminOnly?: boolean }[] = [
+  { to: "/admin/users", label: "Admin Users", adminOnly: true },
   { to: "/competitions", label: "Competitions" },
   { to: "/control", label: "Control Center" },
   { to: "/lifters", label: "Manage Lifters", requiresCompetition: true },
@@ -1657,7 +1658,6 @@ const navItems: { to: string; label: string; requiresCompetition?: boolean; admi
   { to: "/signals", label: "Referee Signals" },
   { to: "/screen", label: "Display Screens" },
   { to: "/results", label: "Results", requiresCompetition: true },
-  { to: "/admin/users", label: "Admin Users", adminOnly: true },
   { to: "/settings", label: "Settings + Backup" },
 ];
 
@@ -1728,7 +1728,13 @@ const DashboardLayout = () => {
                   `block rounded-lg px-3 py-3 text-sm transition ${
                     item.requiresCompetition && !activeCompetitionId ? "opacity-60 " : ""
                   }${
-                    isActive ? "bg-cyan-400/20 text-cyan-200" : "text-slate-200 hover:bg-white/10"
+                    item.adminOnly
+                      ? isActive
+                        ? "bg-violet-500/30 text-violet-100 ring-1 ring-violet-300/40"
+                        : "bg-violet-500/10 text-violet-200 hover:bg-violet-500/20"
+                      : isActive
+                        ? "bg-cyan-400/20 text-cyan-200"
+                        : "text-slate-200 hover:bg-white/10"
                   }`
                 }
               >
@@ -1875,9 +1881,11 @@ type AdminUserRow = {
 const AdminUsersPage = () => {
   const [users, setUsers] = useState<AdminUserRow[]>([]);
   const [loading, setLoading] = useState(false);
+  const [creatingUser, setCreatingUser] = useState(false);
   const [notice, setNotice] = useState("");
   const [newUserEmail, setNewUserEmail] = useState("");
   const [newUserPassword, setNewUserPassword] = useState("");
+  const [newUserRole, setNewUserRole] = useState<AuthRole>("user");
 
   const loadUsers = useCallback(async () => {
     setLoading(true);
@@ -1903,9 +1911,11 @@ const AdminUsersPage = () => {
       setNotice("Email and password are required.");
       return;
     }
+    setCreatingUser(true);
     const { error } = await supabase.functions.invoke("admin-create-user", {
-      body: { email: newUserEmail.trim(), password: newUserPassword },
+      body: { email: newUserEmail.trim(), password: newUserPassword, role: newUserRole },
     });
+    setCreatingUser(false);
     if (error) {
       setNotice(error.message || "Failed to create user.");
       return;
@@ -1913,6 +1923,7 @@ const AdminUsersPage = () => {
     setNotice("User created.");
     setNewUserEmail("");
     setNewUserPassword("");
+    setNewUserRole("user");
     await loadUsers();
   };
 
@@ -1933,7 +1944,7 @@ const AdminUsersPage = () => {
       <SectionHeader title="Admin Users" path="/admin/users" />
       <div className="mb-4 rounded-2xl border border-white/15 bg-white/5 p-5">
         <p className="mb-3 text-xs uppercase tracking-[0.2em] text-cyan-300">Create User</p>
-        <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+        <div className="grid gap-3 md:grid-cols-[1fr_1fr_150px_auto]">
           <Field
             type="email"
             value={newUserEmail}
@@ -1946,12 +1957,24 @@ const AdminUsersPage = () => {
             onChange={(e) => setNewUserPassword(e.target.value)}
             placeholder="Temporary password"
           />
+          <select
+            value={newUserRole}
+            onChange={(e) => setNewUserRole(e.target.value === "admin" ? "admin" : "user")}
+            className="h-11 rounded-xl border border-white/20 bg-black/40 px-3 text-sm text-white"
+          >
+            <option value="user" className="bg-slate-900">User</option>
+            <option value="admin" className="bg-slate-900">Admin</option>
+          </select>
           <button
             type="button"
             onClick={() => void createUser()}
-            className="rounded-xl bg-cyan-500 px-4 py-2 font-semibold text-black hover:bg-cyan-400"
+            disabled={creatingUser}
+            className="rounded-xl bg-cyan-500 px-4 py-2 font-semibold text-black transition-opacity hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Add User
+            <span className="inline-flex items-center gap-2">
+              {creatingUser && <span className="h-4 w-4 animate-spin rounded-full border-2 border-black/25 border-t-black" />}
+              {creatingUser ? "Creating..." : "Add User"}
+            </span>
           </button>
         </div>
       </div>
@@ -1970,6 +1993,16 @@ const AdminUsersPage = () => {
             </tr>
           </thead>
           <tbody>
+            {loading && (
+              <tr>
+                <td colSpan={6} className="px-4 py-8 text-center text-slate-300">
+                  <span className="inline-flex items-center gap-2">
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/25 border-t-white" />
+                    Loading users...
+                  </span>
+                </td>
+              </tr>
+            )}
             {users.map((user) => (
               <tr key={user.id} className="border-t border-white/10">
                 <td className="px-4 py-3">{user.email ?? "-"}</td>

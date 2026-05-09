@@ -181,12 +181,26 @@ Return:
 ```json
 {
   "email": "newuser@example.com",
-  "password": "TempPassword123!"
+  "password": "TempPassword123!",
+  "role": "user"
 }
 ```
 
 Inside function:
-- call `adminClient.auth.admin.createUser({ email, password, email_confirm: true })`
+- validate role:
+  - allow only `"user"` or `"admin"`
+  - fallback to `"user"` when missing/invalid
+- then call:
+
+```ts
+const allowedRole = role === "admin" ? "admin" : "user";
+const { data, error } = await adminClient.auth.admin.createUser({
+  email,
+  password,
+  email_confirm: true,
+  app_metadata: { role: allowedRole },
+});
+```
 
 ### 6.5 `admin-set-user-active` request body
 
