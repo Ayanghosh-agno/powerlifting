@@ -5710,7 +5710,7 @@ const PlateStack = ({ weight, includeCollars }: { weight: number; includeCollars
 };
 
 const ResultsPage = () => {
-  const { lifters, setLifters, competitionMode } = useAppContext();
+  const { lifters, setLifters, competitionMode, groups } = useAppContext();
   const [searchTerm, setSearchTerm] = useState("");
   const [notice, setNotice] = useState("");
   const [attemptDrafts, setAttemptDrafts] = useState<Record<string, string>>({});
@@ -5806,6 +5806,14 @@ const ResultsPage = () => {
   return (
     <section>
       <SectionHeader title="Results (GL Points)" path="/results" />
+      {groups.length === 0 ? (
+        <div className="rounded-2xl border border-white/15 bg-black/20 px-5 py-10 text-center">
+          <p className="text-sm text-slate-300">
+            No groups configured for this competition. Add groups under the Groups tab to show results tables.
+          </p>
+        </div>
+      ) : (
+        <>
       <div className="mb-4 flex flex-wrap gap-3">
         <input
           value={searchTerm}
@@ -5932,6 +5940,8 @@ const ResultsPage = () => {
           </tbody>
         </table>
       </div>
+        </>
+      )}
     </section>
   );
 };
@@ -6183,6 +6193,7 @@ const DisplayFullPage = () => {
     timerEndsAt,
     activeCompetitionGroupName,
     competitionMode,
+    groups,
   } = useAppContext();
   const [searchParams] = useSearchParams();
   const rawLayout = searchParams.get("layout") || "signal_results_plate";
@@ -6575,6 +6586,16 @@ const DisplayFullPage = () => {
                   )}
                 </div>
               </div>
+            </div>
+          ) : groups.length === 0 ? (
+            <div
+              className={`flex min-h-[8rem] items-center justify-center rounded-xl border px-4 py-6 text-center ${
+                isDarkTheme ? "border-white/15 bg-black/25 text-slate-300" : "border-slate-200 bg-white/80 text-slate-600"
+              }`}
+            >
+              <p className="text-[clamp(0.8rem,1.6vw,1rem)]">
+                No groups configured. Add groups in the admin Groups tab to show results tables.
+              </p>
             </div>
           ) : (
             <ResultsTable
