@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   HashRouter,
   Link,
+  Navigate,
   NavLink,
   Outlet,
   Route,
@@ -13,6 +14,7 @@ import {
   useSearchParams,
 } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
+import type { Session, User } from "@supabase/supabase-js";
 import indiaStateDistrictData from "../node_modules/india-states-districts/state_discripts.json";
 import { useSupabaseSync, type ConnectedRefereeSlots } from "./lib/useSupabaseSync";
 import {
@@ -31,7 +33,7 @@ import {
   type PersistedState,
 } from "./lib/types";
 import { initializeStateManager } from "./lib/stateManager";
-import { isSupabaseConfigured } from "./lib/supabase";
+import { isSupabaseConfigured, supabase } from "./lib/supabase";
 import { useRefereSessionValidation } from "./hooks/useRefereSessionValidation";
 import { InvalidSessionError } from "./components/InvalidSessionError";
 import { dbRefereeSessions } from "./lib/db";
@@ -711,6 +713,89 @@ const AppContext = createContext<AppContextValue | null>(null);
 const useAppContext = () => {
   const ctx = useContext(AppContext);
   if (!ctx) throw new Error("App context unavailable");
+  return ctx;
+};
+
+type AuthRole = "admin" | "user";
+
+type AuthContextValue = {
+  session: Session | null;
+  user: User | null;
+  role: AuthRole;
+  loading: boolean;
+  isAuthenticated: boolean;
+  signIn: (email: string, password: string) => Promise<{ ok: boolean; message: string }>;
+  signOut: () => Promise<void>;
+};
+
+const AuthContext = createContext<AuthContextValue | null>(null);
+
+const getRoleFromUser = (user: User | null): AuthRole => {
+  const roleFromMetadata = user?.app_metadata?.role;
+  return roleFromMetadata === "admin" ? "admin" : "user";
+};
+
+const AuthProvider = ({ children }: { children: React.ReactNode }) => {
+  const [session, setSession] = useState<Session | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured) {
+      setSession(null);
+      setLoading(false);
+      return;
+    }
+
+    let mounted = true;
+    supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) return;
+      setSession(data.session ?? null);
+      setLoading(false);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession ?? null);
+      setLoading(false);
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  const signIn = async (email: string, password: string) => {
+    if (!isSupabaseConfigured) {
+      return { ok: false, message: "Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY." };
+    }
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) return { ok: false, message: error.message };
+    return { ok: true, message: "Signed in." };
+  };
+
+  const signOut = async () => {
+    if (!isSupabaseConfigured) return;
+    await supabase.auth.signOut();
+  };
+
+  const value: AuthContextValue = {
+    session,
+    user: session?.user ?? null,
+    role: getRoleFromUser(session?.user ?? null),
+    loading,
+    isAuthenticated: Boolean(session?.user),
+    signIn,
+    signOut,
+  };
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+};
+
+const useAuth = () => {
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error("Auth context unavailable");
   return ctx;
 };
 
@@ -1551,7 +1636,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
   );
 };
 
-const navItems: { to: string; label: string; requiresCompetition?: boolean }[] = [
+const navItems: { to: string; label: string; requiresCompetition?: boolean; adminOnly?: boolean }[] = [
   { to: "/competitions", label: "Competitions" },
   { to: "/control", label: "Control Center" },
   { to: "/lifters", label: "Manage Lifters", requiresCompetition: true },
@@ -1559,6 +1644,7 @@ const navItems: { to: string; label: string; requiresCompetition?: boolean }[] =
   { to: "/signals", label: "Referee Signals" },
   { to: "/screen", label: "Display Screens" },
   { to: "/results", label: "Results", requiresCompetition: true },
+  { to: "/admin/users", label: "Admin Users", adminOnly: true },
   { to: "/settings", label: "Settings + Backup" },
 ];
 
@@ -1577,8 +1663,10 @@ const SectionHeader = ({ title }: { title: string; path?: string }) => (
 
 const DashboardLayout = () => {
   const { activeCompetitionId, activeCompetitionName } = useAppContext();
+  const { user, role, signOut } = useAuth();
   const [open, setOpen] = useState(false);
   const location = useLocation();
+  const visibleNavItems = navItems.filter((item) => !item.adminOnly || role === "admin");
 
   return (
     <div className="min-h-screen bg-[#05070f] text-white">
@@ -1599,9 +1687,26 @@ const DashboardLayout = () => {
           <p className="mt-2 text-xs text-slate-300">
             {activeCompetitionId ? `Active: ${activeCompetitionName}` : "Create/select a competition"}
           </p>
+          <p className="mt-2 text-xs text-slate-400">{user?.email ?? "Not signed in"}</p>
+          <div className="mt-3 flex items-center gap-2">
+            <span
+              className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
+                role === "admin" ? "border-cyan-400/40 bg-cyan-500/15 text-cyan-200" : "border-white/20 bg-white/10 text-slate-200"
+              }`}
+            >
+              {role}
+            </span>
+            <button
+              type="button"
+              onClick={() => void signOut()}
+              className="rounded-lg border border-white/20 bg-white/10 px-2.5 py-1 text-[11px] font-semibold text-slate-200 hover:bg-white/20"
+            >
+              Sign Out
+            </button>
+          </div>
         </div>
         <nav className="space-y-1">
-          {navItems.map((item) => (
+          {visibleNavItems.map((item) => (
             <motion.div key={item.to} whileHover={{ x: 5 }} transition={{ duration: 0.2 }}>
               <NavLink
                 to={item.to}
@@ -1635,6 +1740,252 @@ const DashboardLayout = () => {
         </AnimatePresence>
       </main>
     </div>
+  );
+};
+
+const RequireAuth = ({ children }: { children: React.ReactNode }) => {
+  const { isAuthenticated, loading } = useAuth();
+  const location = useLocation();
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#05070f] text-white">
+        <p className="text-sm text-slate-300">Checking session...</p>
+      </div>
+    );
+  }
+  if (!isAuthenticated) {
+    return <Navigate to="/login" state={{ from: location.pathname }} replace />;
+  }
+  return <>{children}</>;
+};
+
+const RequireAdmin = ({ children }: { children: React.ReactNode }) => {
+  const { role, loading } = useAuth();
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#05070f] text-white">
+        <p className="text-sm text-slate-300">Checking permissions...</p>
+      </div>
+    );
+  }
+  if (role !== "admin") {
+    return (
+      <section>
+        <SectionHeader title="Admin Only" />
+        <div className="rounded-2xl border border-white/15 bg-white/5 p-5 text-slate-200">
+          <p className="text-sm">You need admin access for this page.</p>
+        </div>
+      </section>
+    );
+  }
+  return <>{children}</>;
+};
+
+const LoginPage = () => {
+  const { isAuthenticated, loading, signIn } = useAuth();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [notice, setNotice] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const from = (location.state as { from?: string } | null)?.from ?? "/";
+
+  useEffect(() => {
+    if (!loading && isAuthenticated) {
+      navigate(from, { replace: true });
+    }
+  }, [loading, isAuthenticated, navigate, from]);
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setSubmitting(true);
+    const result = await signIn(email.trim(), password);
+    setNotice(result.message);
+    setSubmitting(false);
+    if (result.ok) {
+      navigate(from, { replace: true });
+    }
+  };
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-[#05070f] px-4 text-white">
+      <form onSubmit={handleSubmit} className="w-full max-w-md rounded-2xl border border-white/15 bg-white/5 p-6">
+        <h1 className="text-2xl font-semibold">Admin Login</h1>
+        <p className="mt-1 text-sm text-slate-400">Sign in with Supabase email and password.</p>
+        {!isSupabaseConfigured && (
+          <p className="mt-4 rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+            Supabase is not configured. Add your URL and anon key in `.env`.
+          </p>
+        )}
+        <div className="mt-4 space-y-3">
+          <Field
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="Email"
+            autoComplete="email"
+            required
+          />
+          <Field
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Password"
+            autoComplete="current-password"
+            required
+          />
+        </div>
+        {notice && <p className="mt-3 text-sm text-cyan-200">{notice}</p>}
+        <button
+          type="submit"
+          disabled={submitting || !isSupabaseConfigured}
+          className="mt-5 w-full rounded-xl bg-cyan-500 py-2 font-semibold text-black transition-opacity hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {submitting ? "Signing in..." : "Sign In"}
+        </button>
+      </form>
+    </div>
+  );
+};
+
+type AdminUserRow = {
+  id: string;
+  email: string | null;
+  disabled: boolean;
+  role?: string;
+  created_at?: string;
+  last_sign_in_at?: string | null;
+};
+
+const AdminUsersPage = () => {
+  const [users, setUsers] = useState<AdminUserRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [newUserEmail, setNewUserEmail] = useState("");
+  const [newUserPassword, setNewUserPassword] = useState("");
+
+  const loadUsers = useCallback(async () => {
+    setLoading(true);
+    const { data, error } = await supabase.functions.invoke("admin-list-users");
+    setLoading(false);
+    if (error) {
+      setNotice(error.message || "Failed to load users.");
+      return;
+    }
+    const rows = Array.isArray((data as { users?: unknown[] } | null)?.users)
+      ? ((data as { users: AdminUserRow[] }).users ?? [])
+      : [];
+    setUsers(rows);
+    setNotice(`Loaded ${rows.length} user(s).`);
+  }, []);
+
+  useEffect(() => {
+    void loadUsers();
+  }, [loadUsers]);
+
+  const createUser = async () => {
+    if (!newUserEmail.trim() || !newUserPassword.trim()) {
+      setNotice("Email and password are required.");
+      return;
+    }
+    const { error } = await supabase.functions.invoke("admin-create-user", {
+      body: { email: newUserEmail.trim(), password: newUserPassword },
+    });
+    if (error) {
+      setNotice(error.message || "Failed to create user.");
+      return;
+    }
+    setNotice("User created.");
+    setNewUserEmail("");
+    setNewUserPassword("");
+    await loadUsers();
+  };
+
+  const toggleUserActive = async (user: AdminUserRow) => {
+    const { error } = await supabase.functions.invoke("admin-set-user-active", {
+      body: { userId: user.id, active: user.disabled },
+    });
+    if (error) {
+      setNotice(error.message || "Failed to update user.");
+      return;
+    }
+    setNotice(`User ${user.email ?? user.id} ${user.disabled ? "activated" : "disabled"}.`);
+    await loadUsers();
+  };
+
+  return (
+    <section>
+      <SectionHeader title="Admin Users" path="/admin/users" />
+      <div className="mb-4 rounded-2xl border border-white/15 bg-white/5 p-5">
+        <p className="mb-3 text-xs uppercase tracking-[0.2em] text-cyan-300">Create User</p>
+        <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+          <Field
+            type="email"
+            value={newUserEmail}
+            onChange={(e) => setNewUserEmail(e.target.value)}
+            placeholder="New user email"
+          />
+          <Field
+            type="text"
+            value={newUserPassword}
+            onChange={(e) => setNewUserPassword(e.target.value)}
+            placeholder="Temporary password"
+          />
+          <button
+            type="button"
+            onClick={() => void createUser()}
+            className="rounded-xl bg-cyan-500 px-4 py-2 font-semibold text-black hover:bg-cyan-400"
+          >
+            Add User
+          </button>
+        </div>
+      </div>
+
+      {notice && <p className="mb-3 text-sm text-cyan-200">{notice}</p>}
+      <div className="overflow-x-auto rounded-2xl border border-white/15 bg-black/20">
+        <table className="min-w-[860px] text-sm">
+          <thead className="bg-white/5 text-left text-slate-300">
+            <tr>
+              <th className="px-4 py-3">Email</th>
+              <th className="px-4 py-3">Role</th>
+              <th className="px-4 py-3">Status</th>
+              <th className="px-4 py-3">Created</th>
+              <th className="px-4 py-3">Last Sign In</th>
+              <th className="px-4 py-3">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {users.map((user) => (
+              <tr key={user.id} className="border-t border-white/10">
+                <td className="px-4 py-3">{user.email ?? "-"}</td>
+                <td className="px-4 py-3">{user.role ?? "user"}</td>
+                <td className="px-4 py-3">{user.disabled ? "Disabled" : "Active"}</td>
+                <td className="px-4 py-3">{user.created_at ? new Date(user.created_at).toLocaleString() : "-"}</td>
+                <td className="px-4 py-3">{user.last_sign_in_at ? new Date(user.last_sign_in_at).toLocaleString() : "-"}</td>
+                <td className="px-4 py-3">
+                  <button
+                    type="button"
+                    onClick={() => void toggleUserActive(user)}
+                    className="rounded-lg border border-white/20 bg-white/10 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/20"
+                  >
+                    {user.disabled ? "Activate" : "Deactivate"}
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {!loading && users.length === 0 && (
+              <tr>
+                <td colSpan={6} className="px-4 py-6 text-center text-slate-400">
+                  No users returned.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 };
 
@@ -4482,6 +4833,7 @@ const RefereePage = () => {
   const [linkCopied, setLinkCopied] = useState(false);
   const [activeSession, setActiveSession] = useState<{ id: string; expires_at: string } | null>(null);
   const [loadingSession, setLoadingSession] = useState(true);
+  const [sessionNotice, setSessionNotice] = useState("");
 
   useEffect(() => {
     const requestedCompetitionId = searchParams.get("cid");
@@ -4496,10 +4848,12 @@ const RefereePage = () => {
   useEffect(() => {
     if (!activeCompetitionId) {
       setLoadingSession(false);
+      setActiveSession(null);
       return;
     }
 
     const loadActiveSession = async () => {
+      setLoadingSession(true);
       try {
         const sessions = await dbRefereeSessions.getActiveForCompetition(activeCompetitionId);
         setActiveSession(sessions[0] || null);
@@ -4532,24 +4886,42 @@ const RefereePage = () => {
     return url;
   };
 
-  const openQrForSlot = async (slot: RefereeSlot, title: string) => {
-    setLinkCopied(false);
+  const refreshRefereeSession = async () => {
+    if (!activeCompetitionId) {
+      setSessionNotice("Select a competition first.");
+      return;
+    }
+    if (!isSupabaseConfigured) {
+      setSessionNotice("Supabase is not configured. Session-based QR links are unavailable.");
+      return;
+    }
+    setSessionNotice("Creating 24-hour referee session...");
     try {
-      if (!activeCompetitionId) return;
-      if (!isSupabaseConfigured) {
-        const url = buildRefereeLink(slot);
-        setQrModal({ slot, title, url, sessionId: "offline" });
-        return;
-      }
       const session = await dbRefereeSessions.create(activeCompetitionId);
-      const url = buildRefereeLink(slot, session.id);
-      setQrModal({ slot, title, url, sessionId: session.id });
       setActiveSession(session);
+      setSessionNotice(`Session ready (valid until ${new Date(session.expires_at).toLocaleString()}).`);
     } catch (error) {
       console.error("Failed to create referee session:", error);
-      const fallbackUrl = buildRefereeLink(slot);
-      setQrModal({ slot, title, url: fallbackUrl, sessionId: "fallback" });
+      setSessionNotice("Failed to create referee session. Please try again.");
     }
+  };
+
+  const openQrForSlot = async (slot: RefereeSlot, title: string) => {
+    setLinkCopied(false);
+    if (!activeCompetitionId) {
+      setSessionNotice("Select a competition first.");
+      return;
+    }
+    if (!isSupabaseConfigured) {
+      setSessionNotice("Supabase is not configured. Session-based QR links are unavailable.");
+      return;
+    }
+    if (!activeSession) {
+      setSessionNotice("Create a referee session first.");
+      return;
+    }
+    const url = buildRefereeLink(slot, activeSession.id);
+    setQrModal({ slot, title, url, sessionId: activeSession.id });
   };
 
   const copyRefereeLink = async () => {
@@ -4594,63 +4966,97 @@ const RefereePage = () => {
       {view === "panel" ? (
         <RefereePanelTab />
       ) : (
-        <motion.div
-          className="grid grid-cols-1 gap-6 lg:grid-cols-3"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-        >
-          {REFEREE_SLOT_CONFIG.map((slot, idx) => {
-            const isConnected = connectedRefereeSlots[slot.key];
-
-            return (
-              <motion.button
-                key={slot.key}
+        <div className="space-y-5">
+          <div className="rounded-2xl border border-white/15 bg-white/5 p-5">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex-1 min-w-56">
+                <p className="text-xs uppercase tracking-[0.2em] text-cyan-300">Referee Session</p>
+                {loadingSession ? (
+                  <p className="mt-2 text-sm text-slate-400">Checking active session...</p>
+                ) : activeSession ? (
+                  <>
+                    <p className="mt-2 text-sm text-emerald-200">Active session: {activeSession.id}</p>
+                    <p className="text-xs text-emerald-300/80">Valid until {new Date(activeSession.expires_at).toLocaleString()}</p>
+                  </>
+                ) : (
+                  <p className="mt-2 text-sm text-amber-200">No active session. Create one before generating QR links.</p>
+                )}
+              </div>
+              <button
                 type="button"
-                onClick={() => openQrForSlot(slot.key, slot.label)}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: idx * 0.1, duration: 0.4 }}
-                whileHover={{ y: -4, transition: { duration: 0.2 } }}
-                className={`group relative overflow-hidden rounded-2xl border backdrop-blur-sm transition-all duration-300 ${
-                  isConnected
-                    ? `border-emerald-400/40 bg-gradient-to-br from-emerald-500/15 to-emerald-600/5 hover:border-emerald-300/60 hover:from-emerald-500/25 hover:to-emerald-600/15`
-                    : `border-slate-600/40 bg-gradient-to-br from-slate-700/10 to-slate-800/10 hover:border-slate-500/60 hover:from-slate-700/20 hover:to-slate-800/20`
-                }`}
+                onClick={() => void refreshRefereeSession()}
+                disabled={!activeCompetitionId || !isSupabaseConfigured}
+                className="rounded-xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-black transition-opacity hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                {activeSession ? "Refresh Session (24h)" : "Create Session (24h)"}
+              </button>
+            </div>
+            {sessionNotice && <p className="mt-3 text-sm text-cyan-200">{sessionNotice}</p>}
+          </div>
 
-                <div className="relative p-8 space-y-6">
-                  <div>
-                    <p className="text-4xl font-bold bg-gradient-to-r from-white to-slate-200 bg-clip-text text-transparent">
-                      {slot.label}
-                    </p>
-                    <p className="mt-2 text-xs uppercase tracking-[0.15em] text-slate-400 font-medium">Referee Station</p>
-                  </div>
+          <motion.div
+            className="grid grid-cols-1 gap-6 lg:grid-cols-3"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+          >
+            {REFEREE_SLOT_CONFIG.map((slot, idx) => {
+              const isConnected = connectedRefereeSlots[slot.key];
 
-                  <div className="flex items-center gap-2">
-                    <motion.div
-                      animate={{ scale: isConnected ? [1, 1.2, 1] : 1 }}
-                      transition={{ repeat: isConnected ? Infinity : 0, duration: 2 }}
-                      className={`h-2.5 w-2.5 rounded-full ${
-                        isConnected ? "bg-emerald-400 shadow-lg shadow-emerald-400/50" : "bg-slate-500"
-                      }`}
-                    />
-                    <span className={`text-xs font-semibold ${
-                      isConnected ? "text-emerald-300" : "text-slate-400"
-                    }`}>
-                      {isConnected ? "Connected" : "Offline"}
-                    </span>
-                  </div>
+              return (
+                <motion.button
+                  key={slot.key}
+                  type="button"
+                  onClick={() => openQrForSlot(slot.key, slot.label)}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: idx * 0.1, duration: 0.4 }}
+                  whileHover={{ y: -4, transition: { duration: 0.2 } }}
+                  disabled={!activeSession}
+                  className={`group relative overflow-hidden rounded-2xl border backdrop-blur-sm transition-all duration-300 ${
+                    !activeSession
+                      ? "cursor-not-allowed border-slate-700/40 bg-slate-900/30 opacity-60"
+                      : isConnected
+                        ? `border-emerald-400/40 bg-gradient-to-br from-emerald-500/15 to-emerald-600/5 hover:border-emerald-300/60 hover:from-emerald-500/25 hover:to-emerald-600/15`
+                        : `border-slate-600/40 bg-gradient-to-br from-slate-700/10 to-slate-800/10 hover:border-slate-500/60 hover:from-slate-700/20 hover:to-slate-800/20`
+                  }`}
+                >
+                  <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
 
-                  <div className="pt-2 border-t border-white/5">
-                    <p className="text-xs uppercase tracking-wider text-slate-400">Tap for QR code</p>
+                  <div className="relative p-8 space-y-6">
+                    <div>
+                      <p className="text-4xl font-bold bg-gradient-to-r from-white to-slate-200 bg-clip-text text-transparent">
+                        {slot.label}
+                      </p>
+                      <p className="mt-2 text-xs uppercase tracking-[0.15em] text-slate-400 font-medium">Referee Station</p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <motion.div
+                        animate={{ scale: isConnected ? [1, 1.2, 1] : 1 }}
+                        transition={{ repeat: isConnected ? Infinity : 0, duration: 2 }}
+                        className={`h-2.5 w-2.5 rounded-full ${
+                          isConnected ? "bg-emerald-400 shadow-lg shadow-emerald-400/50" : "bg-slate-500"
+                        }`}
+                      />
+                      <span className={`text-xs font-semibold ${
+                        isConnected ? "text-emerald-300" : "text-slate-400"
+                      }`}>
+                        {isConnected ? "Connected" : "Offline"}
+                      </span>
+                    </div>
+
+                    <div className="pt-2 border-t border-white/5">
+                      <p className="text-xs uppercase tracking-wider text-slate-400">
+                        {activeSession ? "Tap for QR code" : "Create session first"}
+                      </p>
+                    </div>
                   </div>
-                </div>
-              </motion.button>
-            );
-          })}
-        </motion.div>
+                </motion.button>
+              );
+            })}
+          </motion.div>
+        </div>
       )}
 
       {qrModal ? (
@@ -6563,9 +6969,23 @@ const DbSetupBanner = () => {
 
 const AppRoutes = () => (
   <Routes>
-    <Route path="/display/full" element={<DisplayFullPage />} />
+    <Route path="/login" element={<LoginPage />} />
+    <Route
+      path="/display/full"
+      element={(
+        <RequireAuth>
+          <DisplayFullPage />
+        </RequireAuth>
+      )}
+    />
     <Route path="/signals/:station" element={<RefereeStationPage />} />
-    <Route element={<DashboardLayout />}>
+    <Route
+      element={(
+        <RequireAuth>
+          <DashboardLayout />
+        </RequireAuth>
+      )}
+    >
       <Route path="/" element={<CompetitionPage />} />
       <Route path="/competitions" element={<CompetitionPage />} />
       <Route path="/control" element={<ControlPage />} />
@@ -6595,6 +7015,14 @@ const AppRoutes = () => (
           </CompetitionGate>
         }
       />
+      <Route
+        path="/admin/users"
+        element={(
+          <RequireAdmin>
+            <AdminUsersPage />
+          </RequireAdmin>
+        )}
+      />
       <Route path="/settings" element={<SettingsPage />} />
     </Route>
   </Routes>
@@ -6602,11 +7030,13 @@ const AppRoutes = () => (
 
 export default function App() {
   return (
-    <AppProvider>
-      <HashRouter>
-        <AppRoutes />
-        <DbSetupBanner />
-      </HashRouter>
-    </AppProvider>
+    <AuthProvider>
+      <AppProvider>
+        <HashRouter>
+          <AppRoutes />
+          <DbSetupBanner />
+        </HashRouter>
+      </AppProvider>
+    </AuthProvider>
   );
 }

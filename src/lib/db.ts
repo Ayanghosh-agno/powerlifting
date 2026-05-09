@@ -262,6 +262,8 @@ export const dbRefereeDevices = {
 
 export const dbRefereeSessions = {
   async create(competitionId: string): Promise<DbRefereeSession> {
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+
     await supabase
       .from("referee_sessions")
       .delete()
@@ -272,6 +274,7 @@ export const dbRefereeSessions = {
       .insert({
         competition_id: competitionId,
         is_active: true,
+        expires_at: expiresAt,
       })
       .select()
       .single();

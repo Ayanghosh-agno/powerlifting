@@ -37,40 +37,29 @@ export function useRefereSessionValidation(): UseRefereSessionValidationResult {
         }
 
         if (!urlSessionId) {
-          // Keep referee stations usable if session token is unavailable but competition is known.
-          if (cidFromUrl) {
-            setIsValid(true);
-            setError(null);
-          } else {
-            setError("No session provided. Please use a valid referee link.");
-          }
+          setIsValid(false);
+          setError("No session provided. Please create a referee session and regenerate the QR link.");
           setIsLoading(false);
           return;
         }
 
         const session = await dbRefereeSessions.validate(urlSessionId);
         if (session) {
-          setIsValid(true);
-          setError(null);
-        } else {
-          // Allow loading with competition context even if the specific token expires.
-          if (cidFromUrl) {
+          if (cidFromUrl && session.competition_id !== cidFromUrl) {
+            setIsValid(false);
+            setError("Session does not match this competition. Please generate a new referee session.");
+          } else {
             setIsValid(true);
             setError(null);
-          } else {
-            setIsValid(false);
-            setError("Session expired or invalid. Please request a new link from the referee coordinator.");
           }
+        } else {
+          setIsValid(false);
+          setError("Session expired or invalid. Please create a new referee session before opening this station.");
         }
       } catch (err) {
         console.error("Session validation error:", err);
-        if (cidFromUrl) {
-          setIsValid(true);
-          setError(null);
-        } else {
-          setIsValid(false);
-          setError("Failed to validate session. Please check your connection and try again.");
-        }
+        setIsValid(false);
+        setError("Failed to validate session. Please check your connection and try again.");
       } finally {
         setIsLoading(false);
       }
