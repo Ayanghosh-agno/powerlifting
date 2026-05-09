@@ -3382,6 +3382,40 @@ const LIFT_STAGE_COLORS: Record<LiftType, string> = {
   deadlift: "bg-rose-500/20 text-rose-300 border-rose-500/30",
 };
 
+type GroupLiftProgress = "PENDING" | "IN_PROGRESS" | "DONE";
+
+const isAttemptConfigured = (attempt: Attempt | undefined): boolean =>
+  typeof attempt?.weight === "number" ||
+  (typeof attempt?.weight === "string" && attempt.weight.trim() !== "");
+
+const resolveGroupLiftProgress = (groupLifters: Lifter[], lift: LiftType): GroupLiftProgress => {
+  if (groupLifters.length === 0) return "PENDING";
+
+  let hasConfiguredAttempt = false;
+  let hasUnresolvedConfiguredAttempt = false;
+
+  for (const lifter of groupLifters) {
+    const attempts = getAttempts(lifter, lift);
+    for (const attempt of attempts) {
+      if (!isAttemptConfigured(attempt)) continue;
+      hasConfiguredAttempt = true;
+      if (attempt.status !== "GOOD" && attempt.status !== "NO") {
+        hasUnresolvedConfiguredAttempt = true;
+      }
+    }
+  }
+
+  if (!hasConfiguredAttempt) return "PENDING";
+  if (hasUnresolvedConfiguredAttempt) return "IN_PROGRESS";
+  return "DONE";
+};
+
+const GROUP_LIFT_PROGRESS_STYLE: Record<GroupLiftProgress, string> = {
+  PENDING: "bg-white/10 text-slate-300 border-white/20",
+  IN_PROGRESS: "bg-amber-500/20 text-amber-300 border-amber-500/30",
+  DONE: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
+};
+
 const GroupManagementPage = () => {
   const {
     groups,
@@ -3393,6 +3427,7 @@ const GroupManagementPage = () => {
     setCurrentAttemptIndex,
     setCurrentLifterId,
     setCompetitionMode,
+    activeCompetitionGroupName,
     setActiveCompetitionGroupName,
     setNextAttemptQueue,
   } = useAppContext();
@@ -3571,6 +3606,7 @@ const GroupManagementPage = () => {
     const groupLifters = lifters.filter((l) => isInGroup(l.group, group.name) && !l.disqualified);
     if (groupLifters.length === 0) { showNotice("No active lifters in this group.", "error"); return; }
     const newMode: CompetitionMode = enabledLifts.length === 1 && enabledLifts[0] === "bench" ? "BENCH_ONLY" : "FULL_GAME";
+    setGroupLiftStage(group.id, firstLift);
     setNextAttemptQueue([]);
     setActiveCompetitionGroupName(group.name);
     setCompetitionMode(newMode);
@@ -3626,6 +3662,33 @@ const GroupManagementPage = () => {
     if (editingGroupId === group.id) { setEditingGroupId(null); setEditingGroupName(""); }
     setConfirmDeleteGroupId(null);
     showNotice(`Group "${group.name}" deleted.`);
+  };
+
+  const resetGroupLifterData = (group: Group) => {
+    const targetLifters = lifters.filter((l) => isInGroup(l.group, group.name));
+    if (targetLifters.length === 0) {
+      showNotice(`No lifters found in Group ${group.name}.`, "error");
+      return;
+    }
+    const confirmed = window.confirm(
+      `Reset all lifting data for ${targetLifters.length} lifter(s) in Group ${group.name}? This clears all squat/bench/deadlift attempts.`,
+    );
+    if (!confirmed) return;
+
+    setLifters(
+      lifters.map((l) =>
+        isInGroup(l.group, group.name)
+          ? {
+              ...l,
+              disqualified: false,
+              squatAttempts: emptyAttemptsFromFirst(""),
+              benchAttempts: emptyAttemptsFromFirst(""),
+              deadliftAttempts: emptyAttemptsFromFirst(""),
+            }
+          : l,
+      ),
+    );
+    showNotice(`Reset lifting data for ${targetLifters.length} lifter(s) in Group ${group.name}.`);
   };
 
   const startEditLifter = (lifter: Lifter) => {
@@ -3933,10 +3996,17 @@ const GroupManagementPage = () => {
         <div className="space-y-3">
           {filteredGroups.map((group) => {
             const groupLifterCount = lifters.filter((l) => isInGroup(l.group, group.name)).length;
+            const groupActiveLifters = lifters.filter((l) => isInGroup(l.group, group.name) && !l.disqualified);
+            const liftProgress = {
+              squat: resolveGroupLiftProgress(groupActiveLifters, "squat"),
+              bench: resolveGroupLiftProgress(groupActiveLifters, "bench"),
+              deadlift: resolveGroupLiftProgress(groupActiveLifters, "deadlift"),
+            };
             const isEditingThis = editingGroupId === group.id;
             const isStartingComp = startCompGroupId === group.id;
             const isConfirmingDelete = confirmDeleteGroupId === group.id;
             const isActive = activeGroupFilter === group.name;
+            const isRunningGroup = activeCompetitionGroupName === group.name;
 
             return (
               <div
@@ -3958,9 +4028,26 @@ const GroupManagementPage = () => {
                           className="h-8 w-40 rounded-lg border border-cyan-400/60 bg-black/40 px-2 text-sm font-semibold text-white focus:outline-none"
                         />
                       ) : (
-                        <p className="font-semibold text-white">{group.name}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="font-semibold text-white">{group.name}</p>
+                          {isRunningGroup && (
+                            <span className="rounded-full border border-emerald-400/40 bg-emerald-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-emerald-200">
+                              Running
+                            </span>
+                          )}
+                        </div>
                       )}
                       <p className="text-xs text-slate-400">{groupLifterCount} lifter{groupLifterCount !== 1 ? "s" : ""}</p>
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                        {LIFT_STAGE_OPTIONS.map((opt) => (
+                          <span
+                            key={`${group.id}-${opt.value}-progress`}
+                            className={`rounded-md border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${GROUP_LIFT_PROGRESS_STYLE[liftProgress[opt.value]]}`}
+                          >
+                            {opt.label}: {liftProgress[opt.value].replace("_", " ")}
+                          </span>
+                        ))}
+                      </div>
                     </div>
                   </div>
 
@@ -4008,6 +4095,12 @@ const GroupManagementPage = () => {
                           className="rounded-lg bg-red-500/15 px-3 py-1.5 text-xs font-medium text-red-300 transition-colors hover:bg-red-500/25"
                         >
                           Delete
+                        </button>
+                        <button
+                          onClick={() => resetGroupLifterData(group)}
+                          className="rounded-lg bg-amber-500/15 px-3 py-1.5 text-xs font-medium text-amber-200 transition-colors hover:bg-amber-500/25"
+                        >
+                          Reset Group
                         </button>
                       </>
                     )}
@@ -5165,10 +5258,11 @@ const PlateStack = ({ weight, includeCollars }: { weight: number; includeCollars
 };
 
 const ResultsPage = () => {
-  const { lifters, setLifters } = useAppContext();
+  const { lifters, setLifters, competitionMode } = useAppContext();
   const [searchTerm, setSearchTerm] = useState("");
   const [notice, setNotice] = useState("");
   const [attemptDrafts, setAttemptDrafts] = useState<Record<string, string>>({});
+  const isBenchOnly = competitionMode === "BENCH_ONLY";
 
   const updateAttemptCell = (
     lifterId: string,
@@ -5277,15 +5371,23 @@ const ResultsPage = () => {
               <th className="px-4 py-3">Lifter</th>
               <th className="px-4 py-3">Group</th>
               <th className="px-4 py-3">Team</th>
-              <th className="px-4 py-3">SQ1</th>
-              <th className="px-4 py-3">SQ2</th>
-              <th className="px-4 py-3">SQ3</th>
+              {!isBenchOnly && (
+                <>
+                  <th className="px-4 py-3">SQ1</th>
+                  <th className="px-4 py-3">SQ2</th>
+                  <th className="px-4 py-3">SQ3</th>
+                </>
+              )}
               <th className="px-4 py-3">BP1</th>
               <th className="px-4 py-3">BP2</th>
               <th className="px-4 py-3">BP3</th>
-              <th className="px-4 py-3">DL1</th>
-              <th className="px-4 py-3">DL2</th>
-              <th className="px-4 py-3">DL3</th>
+              {!isBenchOnly && (
+                <>
+                  <th className="px-4 py-3">DL1</th>
+                  <th className="px-4 py-3">DL2</th>
+                  <th className="px-4 py-3">DL3</th>
+                </>
+              )}
               <th className="px-4 py-3">Total</th>
               <th className="px-4 py-3">GL</th>
             </tr>
@@ -5353,15 +5455,23 @@ const ResultsPage = () => {
                     <td className="px-4 py-3 font-semibold">{r.name}</td>
                     <td className="px-4 py-3">{r.group || "-"}</td>
                     <td className="px-4 py-3">{r.team || "-"}</td>
-                    {renderEditor("squat", 0)}
-                    {renderEditor("squat", 1)}
-                    {renderEditor("squat", 2)}
+                    {!isBenchOnly && (
+                      <>
+                        {renderEditor("squat", 0)}
+                        {renderEditor("squat", 1)}
+                        {renderEditor("squat", 2)}
+                      </>
+                    )}
                     {renderEditor("bench", 0)}
                     {renderEditor("bench", 1)}
                     {renderEditor("bench", 2)}
-                    {renderEditor("deadlift", 0)}
-                    {renderEditor("deadlift", 1)}
-                    {renderEditor("deadlift", 2)}
+                    {!isBenchOnly && (
+                      <>
+                        {renderEditor("deadlift", 0)}
+                        {renderEditor("deadlift", 1)}
+                        {renderEditor("deadlift", 2)}
+                      </>
+                    )}
                     <td className="px-4 py-3 font-semibold">{r.total} kg</td>
                     <td className="px-4 py-3">{r.glPoints}</td>
                   </tr>
@@ -5423,12 +5533,15 @@ const ResultsTable = memo(({
   ungroupedRanking,
   currentLifterId,
   isDarkTheme,
+  competitionMode,
 }: {
   rankingByGroup: { groupName: string; members: RankedLifter[] }[];
   ungroupedRanking: RankedLifter[];
   currentLifterId: string | null;
   isDarkTheme: boolean;
+  competitionMode: CompetitionMode;
 }) => {
+  const isBenchOnly = competitionMode === "BENCH_ONLY";
   const isDualCategory = (category: string) => category.includes(" + ");
 
   const getDualCategoryParts = (category: string): [string, string] => {
@@ -5484,15 +5597,23 @@ const ResultsTable = memo(({
         </td>
         <td className="px-3 py-2 hidden md:table-cell text-slate-400 text-xs">{displayCategory}</td>
         <td className="px-3 py-2 hidden md:table-cell text-slate-400">{lifter.team || "-"}</td>
-        <AttemptDisplayCell attempt={lifter.squatAttempts[0]} />
-        <AttemptDisplayCell attempt={lifter.squatAttempts[1]} />
-        <AttemptDisplayCell attempt={lifter.squatAttempts[2]} />
+        {!isBenchOnly && (
+          <>
+            <AttemptDisplayCell attempt={lifter.squatAttempts[0]} />
+            <AttemptDisplayCell attempt={lifter.squatAttempts[1]} />
+            <AttemptDisplayCell attempt={lifter.squatAttempts[2]} />
+          </>
+        )}
         <AttemptDisplayCell attempt={lifter.benchAttempts[0]} />
         <AttemptDisplayCell attempt={lifter.benchAttempts[1]} />
         <AttemptDisplayCell attempt={lifter.benchAttempts[2]} />
-        <AttemptDisplayCell attempt={lifter.deadliftAttempts[0]} />
-        <AttemptDisplayCell attempt={lifter.deadliftAttempts[1]} />
-        <AttemptDisplayCell attempt={lifter.deadliftAttempts[2]} />
+        {!isBenchOnly && (
+          <>
+            <AttemptDisplayCell attempt={lifter.deadliftAttempts[0]} />
+            <AttemptDisplayCell attempt={lifter.deadliftAttempts[1]} />
+            <AttemptDisplayCell attempt={lifter.deadliftAttempts[2]} />
+          </>
+        )}
         <td className="px-3 py-2 font-semibold">{lifter.total > 0 ? `${lifter.total} kg` : "-"}</td>
         <td className="px-3 py-2 hidden md:table-cell text-slate-400">{lifter.points || "-"}</td>
       </tr>
@@ -5506,15 +5627,23 @@ const ResultsTable = memo(({
         <th className="px-3 py-2">Lifter</th>
         <th className="px-3 py-2 hidden md:table-cell">Category</th>
         <th className="px-3 py-2 hidden md:table-cell">Team</th>
-        <th className="px-3 py-2">SQ1</th>
-        <th className="px-3 py-2">SQ2</th>
-        <th className="px-3 py-2">SQ3</th>
+        {!isBenchOnly && (
+          <>
+            <th className="px-3 py-2">SQ1</th>
+            <th className="px-3 py-2">SQ2</th>
+            <th className="px-3 py-2">SQ3</th>
+          </>
+        )}
         <th className="px-3 py-2">BP1</th>
         <th className="px-3 py-2">BP2</th>
         <th className="px-3 py-2">BP3</th>
-        <th className="px-3 py-2">DL1</th>
-        <th className="px-3 py-2">DL2</th>
-        <th className="px-3 py-2">DL3</th>
+        {!isBenchOnly && (
+          <>
+            <th className="px-3 py-2">DL1</th>
+            <th className="px-3 py-2">DL2</th>
+            <th className="px-3 py-2">DL3</th>
+          </>
+        )}
         <th className="px-3 py-2 font-semibold">Total</th>
         <th className="px-3 py-2 hidden md:table-cell">GL</th>
       </tr>
@@ -5537,12 +5666,12 @@ const ResultsTable = memo(({
             </div>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[820px] text-xs md:text-sm">
+            <table className={`w-full ${isBenchOnly ? "min-w-[620px]" : "min-w-[820px]"} text-xs md:text-sm`}>
               {tableHead}
               <tbody>
                 {members.length === 0 && (
                   <tr>
-                    <td colSpan={15} className="px-3 py-4 text-center text-slate-500 text-xs">No lifters in this group.</td>
+                    <td colSpan={isBenchOnly ? 9 : 15} className="px-3 py-4 text-center text-slate-500 text-xs">No lifters in this group.</td>
                   </tr>
                 )}
                 {members.map((lifter, idx) => renderLifterRow(lifter, idx, groupName))}
@@ -5568,7 +5697,7 @@ const ResultsTable = memo(({
             </div>
           )}
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[820px] text-xs md:text-sm">
+            <table className={`w-full ${isBenchOnly ? "min-w-[620px]" : "min-w-[820px]"} text-xs md:text-sm`}>
               {tableHead}
               <tbody>
                 {ungroupedRanking.map((lifter, idx) => renderLifterRow(lifter, idx))}
@@ -5601,6 +5730,7 @@ const DisplayFullPage = () => {
     timerPhase,
     timerEndsAt,
     activeCompetitionGroupName,
+    competitionMode,
   } = useAppContext();
   const [searchParams] = useSearchParams();
   const rawLayout = searchParams.get("layout") || "signal_results_plate";
@@ -6000,6 +6130,7 @@ const DisplayFullPage = () => {
               ungroupedRanking={ungroupedRanking}
               currentLifterId={currentLifterId}
               isDarkTheme={isDarkTheme}
+              competitionMode={competitionMode}
             />
           )}
         </div>
