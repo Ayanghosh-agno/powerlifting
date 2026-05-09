@@ -175,7 +175,9 @@ export function useSupabaseSync(
   callbacks: SyncCallbacks,
   deviceId: string,
   readOnly = false,
-  sessionId: string | null = null
+  sessionId: string | null = null,
+  authLoading = false,
+  authUserId: string | null = null,
 ) {
   const dbReadyRef = useRef(false);
   const lastSavedCompRef = useRef<string>("");
@@ -195,7 +197,12 @@ export function useSupabaseSync(
       return;
     }
 
+    if (authLoading) {
+      return;
+    }
+
     let cancelled = false;
+    dbReadyRef.current = false;
 
     async function loadFromDb() {
       try {
@@ -247,7 +254,8 @@ export function useSupabaseSync(
     return () => {
       cancelled = true;
     };
-  }, []);
+    // Wait for Supabase auth to resolve, then reload when identity changes after sign-in.
+  }, [authLoading, authUserId]);
 
   useEffect(() => {
     if (readOnly || !isSupabaseConfigured || !dbReadyRef.current || !activeCompetitionId) return;

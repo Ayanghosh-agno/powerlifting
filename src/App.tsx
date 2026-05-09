@@ -801,7 +801,7 @@ const useAuth = () => {
 };
 
 const AppProvider = ({ children }: { children: React.ReactNode }) => {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const isDisplayScreen = window.location.hash.startsWith("#/display/");
   const isDisplayScreenRef = useRef(isDisplayScreen);
   const userScopedStorageKey = `${STORAGE_KEY}.${user?.id ?? "anon"}`;
@@ -895,7 +895,9 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     { onCompetitionsLoaded, onRefereeSignalsChanged, onDevicesChanged },
     deviceIdRef.current,
     isDisplayScreen,
-    currentRefreeSessionId
+    currentRefreeSessionId,
+    authLoading,
+    user?.id ?? null,
   );
 
   const publishRemotePatch = useCallback((patch: Partial<AppContextValue>) => {
