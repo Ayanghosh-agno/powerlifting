@@ -32,6 +32,7 @@ import {
   type CompetitionRecord,
   type PersistedState,
 } from "./lib/types";
+import { downloadScoreboardPdf } from "./lib/scoreboardPdf";
 import { initializeStateManager } from "./lib/stateManager";
 import { isSupabaseConfigured, supabase } from "./lib/supabase";
 import { useRefereSessionValidation } from "./hooks/useRefereSessionValidation";
@@ -218,19 +219,31 @@ const getGroupSortOrder = (groupName: string): number => {
   return 100;
 };
 
-// IPF Goodlift points coefficients (Classic Raw / Powerlifting total)
-const GOODLIFT_COEFFICIENTS: Record<"Male" | "Female", { a: number; b: number; c: number }> = {
+// IPF Goodlift points coefficients (Classic Raw) — IPF formula May 2020
+const GOODLIFT_COEFFICIENTS_TOTAL: Record<"Male" | "Female", { a: number; b: number; c: number }> = {
   Male: { a: 1199.72839, b: 1025.18162, c: 0.00921 },
   Female: { a: 610.32796, b: 1045.59282, c: 0.03048 },
 };
 
-const calculateGoodliftPoints = (total: number, bodyweight: number | "", sex: "Male" | "Female"): number => {
+// Classic Raw — bench press only (same formula shape, different a, b, c)
+const GOODLIFT_COEFFICIENTS_BENCH_ONLY: Record<"Male" | "Female", { a: number; b: number; c: number }> = {
+  Male: { a: 320.98041, b: 281.40258, c: 0.01008 },
+  Female: { a: 142.40398, b: 442.52671, c: 0.04724 },
+};
+
+const calculateGoodliftPoints = (
+  liftTotalKg: number,
+  bodyweight: number | "",
+  sex: "Male" | "Female",
+  competitionMode: CompetitionMode,
+): number => {
   if (!(typeof bodyweight === "number" && Number.isFinite(bodyweight) && bodyweight > 0)) return 0;
-  if (!(Number.isFinite(total) && total > 0)) return 0;
-  const { a, b, c } = GOODLIFT_COEFFICIENTS[sex];
+  if (!(Number.isFinite(liftTotalKg) && liftTotalKg > 0)) return 0;
+  const { a, b, c } =
+    competitionMode === "BENCH_ONLY" ? GOODLIFT_COEFFICIENTS_BENCH_ONLY[sex] : GOODLIFT_COEFFICIENTS_TOTAL[sex];
   const denominator = a - b * Math.exp(-c * bodyweight);
   if (!Number.isFinite(denominator) || denominator <= 0) return 0;
-  return Number(((total * 100) / denominator).toFixed(2));
+  return Number(((liftTotalKg * 100) / denominator).toFixed(2));
 };
 
 const REFEREE_SLOT_CONFIG: { key: RefereeSlot; label: string; index: number }[] = [
@@ -2213,6 +2226,7 @@ const ControlPage = () => {
     timerPhase,
     timerEndsAt,
     startAttemptClock,
+    clearTimerState,
     nextAttemptQueue,
     updateAttemptForLifter,
     applyRefereeDecision,
@@ -2756,7 +2770,8 @@ const ControlPage = () => {
           <button
             onClick={() => {
               resetSignals();
-              setActionNotice("Signals reset.");
+              clearTimerState();
+              setActionNotice("Signals and platform timer reset.");
             }}
             className="rounded border border-white/20 bg-white/10 px-4 py-2 font-serif text-4xl leading-none"
           >
@@ -3059,7 +3074,6 @@ const LifterManagementPage = () => {
 
   const categoryOptions = getCategoryOptions(form.sex);
   const selectedStateDistricts = INDIA_DISTRICTS[teamState] ?? [];
-  const autoWeightClass = getIPFWeightClass(form.sex, form.bodyweight);
   const resolvedWeightClass = resolveWeightClass(form.sex, form.bodyweight, form.manualWeightClass);
   const visibleLifters = useMemo(() => {
     if (lifterViewFilter === "ACTIVE") return lifters.filter((lifter) => !lifter.disqualified);
@@ -3283,19 +3297,71 @@ const LifterManagementPage = () => {
             <option value="Female" className="bg-slate-900">Female</option>
           </select>
           <Field type="date" value={form.dob} onChange={(e) => setForm((prev) => ({ ...prev, dob: e.target.value }))} />
-          <div className="grid grid-cols-[1fr_140px] gap-2">
-            <Field
-              type="number"
-              placeholder="Bodyweight"
-              value={form.bodyweight}
-              onChange={(e) => setForm((prev) => ({ ...prev, bodyweight: e.target.value === "" ? "" : Number(e.target.value) }))}
-            />
-            <input
-              readOnly
-              value={autoWeightClass || "Class"}
-              aria-label="Auto bodyweight class"
-              className="h-11 rounded-xl border border-cyan-300/40 bg-cyan-500/10 px-2 text-center text-sm font-semibold text-cyan-100"
-            />
+          <div className="md:col-span-2 xl:col-span-3 rounded-xl border border-white/10 bg-black/25 p-4">
+            <p className="mb-3 text-xs uppercase tracking-[0.18em] text-cyan-300">Body weight &amp; weight class</p>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <label htmlFor="add-lifter-bodyweight" className="mb-1 block text-xs font-medium text-slate-400">
+                  Body weight (kg)
+                </label>
+                <Field
+                  id="add-lifter-bodyweight"
+                  type="number"
+                  step="0.05"
+                  min={0}
+                  placeholder="Exact scale weight, e.g. 82.45"
+                  value={form.bodyweight}
+                  onChange={(e) => setForm((prev) => ({ ...prev, bodyweight: e.target.value === "" ? "" : Number(e.target.value) }))}
+                />
+              </div>
+              <div>
+                <p className="mb-1 text-xs font-medium text-slate-400">Weight class</p>
+                <div
+                  className="flex h-11 items-center rounded-xl border border-cyan-300/40 bg-cyan-500/10 px-3 text-sm font-semibold text-cyan-100"
+                  aria-live="polite"
+                >
+                  {resolvedWeightClass || "—"}
+                </div>
+                <p className="mt-1 text-[11px] leading-snug text-slate-500">
+                  Computed from body weight unless you override below (manual class).
+                </p>
+              </div>
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <div>
+                <label htmlFor="add-lifter-manual-wc-select" className="mb-1 block text-xs font-medium text-slate-400">
+                  Manual weight class (optional)
+                </label>
+                <select
+                  id="add-lifter-manual-wc-select"
+                  value={MANUAL_WEIGHT_CLASSES.includes(form.manualWeightClass) ? form.manualWeightClass : ""}
+                  onChange={(e) => setForm((prev) => ({ ...prev, manualWeightClass: e.target.value }))}
+                  className="h-11 w-full rounded-xl border border-white/20 bg-black/40 px-3 text-white"
+                >
+                  <option value="" className="bg-slate-900">
+                    Auto from body weight
+                  </option>
+                  {MANUAL_WEIGHT_CLASSES.map((wc) => (
+                    <option key={wc} value={wc} className="bg-slate-900">
+                      {wc}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="add-lifter-manual-wc-custom" className="mb-1 block text-xs font-medium text-slate-400">
+                  Custom class text (optional)
+                </label>
+                <Field
+                  id="add-lifter-manual-wc-custom"
+                  placeholder="Overrides dropdown when filled"
+                  value={MANUAL_WEIGHT_CLASSES.includes(form.manualWeightClass) ? "" : form.manualWeightClass}
+                  onChange={(e) =>
+                    setForm((prev) => ({ ...prev, manualWeightClass: e.target.value }))
+                  }
+                />
+              </div>
+            </div>
           </div>
           <select
             value={form.category}
@@ -3322,25 +3388,6 @@ const LifterManagementPage = () => {
               </option>
             ))}
           </select>
-          <select
-            value={form.manualWeightClass}
-            onChange={(e) => setForm((prev) => ({ ...prev, manualWeightClass: e.target.value }))}
-            className="h-11 rounded-xl border border-white/20 bg-black/40 px-3"
-          >
-            <option value="" className="bg-slate-900">
-              Auto Weight Class
-            </option>
-            {MANUAL_WEIGHT_CLASSES.map((wc) => (
-              <option key={wc} value={wc} className="bg-slate-900">
-                {wc}
-              </option>
-            ))}
-          </select>
-          <Field
-            placeholder="Manual class (custom)"
-            value={form.manualWeightClass}
-            onChange={(e) => setForm((prev) => ({ ...prev, manualWeightClass: e.target.value }))}
-          />
           <Field
             type="number"
             placeholder="Squat Rack Height"
@@ -3470,7 +3517,6 @@ const LifterManagementPage = () => {
           </label>
         </div>
 
-        <p className="mt-3 text-sm text-cyan-200">Final class: {resolvedWeightClass || "-"}</p>
         <div className="mt-4 flex flex-wrap gap-2">
           <button onClick={saveLifter} className="rounded-xl bg-cyan-500 px-4 py-2 font-semibold text-black">
             Add Lifter
@@ -3517,8 +3563,9 @@ const LifterManagementPage = () => {
               <th className="px-4 py-3">Name</th>
               <th className="px-4 py-3">Sex</th>
               <th className="px-4 py-3">DOB</th>
+              <th className="px-4 py-3">Body wt (kg)</th>
               <th className="px-4 py-3">Category</th>
-              <th className="px-4 py-3">Class</th>
+              <th className="px-4 py-3">Weight class</th>
               <th className="px-4 py-3">Group</th>
               <th className="px-4 py-3">Team</th>
               <th className="px-4 py-3">Lot</th>
@@ -3579,6 +3626,24 @@ const LifterManagementPage = () => {
                   </td>
                   <td className="px-4 py-3">
                     {isEditing ? (
+                      <input
+                        type="number"
+                        step="0.05"
+                        min={0}
+                        value={form.bodyweight}
+                        onChange={(e) => setForm((prev) => ({ ...prev, bodyweight: e.target.value === "" ? "" : Number(e.target.value) }))}
+                        placeholder="kg"
+                        title="Body weight (kg)"
+                        className="h-9 w-24 rounded-lg border border-white/20 bg-black/40 px-2 text-sm"
+                      />
+                    ) : typeof l.bodyweight === "number" ? (
+                      l.bodyweight
+                    ) : (
+                      "-"
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
+                    {isEditing ? (
                       <select
                         value={form.category}
                         onChange={(e) => setForm((prev) => ({ ...prev, category: e.target.value }))}
@@ -3596,19 +3661,29 @@ const LifterManagementPage = () => {
                   </td>
                   <td className="px-4 py-3">
                     {isEditing ? (
-                      <div className="flex min-w-44 gap-2">
-                        <input
-                          type="number"
-                          value={form.bodyweight}
-                          onChange={(e) => setForm((prev) => ({ ...prev, bodyweight: e.target.value === "" ? "" : Number(e.target.value) }))}
-                          placeholder="BW"
-                          className="h-9 w-20 rounded-lg border border-white/20 bg-black/40 px-2 text-sm"
-                        />
-                        <input
-                          value={form.manualWeightClass}
+                      <div className="flex min-w-[14rem] flex-col gap-1">
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-cyan-300/90">
+                          {resolvedWeightClass || "—"}
+                        </span>
+                        <select
+                          value={MANUAL_WEIGHT_CLASSES.includes(form.manualWeightClass) ? form.manualWeightClass : ""}
                           onChange={(e) => setForm((prev) => ({ ...prev, manualWeightClass: e.target.value }))}
-                          placeholder="Class"
-                          className="h-9 w-24 rounded-lg border border-white/20 bg-black/40 px-2 text-sm"
+                          className="h-9 rounded-lg border border-white/20 bg-black/40 px-2 text-sm"
+                        >
+                          <option value="" className="bg-slate-900">
+                            Auto from body weight
+                          </option>
+                          {MANUAL_WEIGHT_CLASSES.map((wc) => (
+                            <option key={wc} value={wc} className="bg-slate-900">
+                              {wc}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          value={MANUAL_WEIGHT_CLASSES.includes(form.manualWeightClass) ? "" : form.manualWeightClass}
+                          onChange={(e) => setForm((prev) => ({ ...prev, manualWeightClass: e.target.value }))}
+                          placeholder="Custom class"
+                          className="h-9 rounded-lg border border-white/20 bg-black/40 px-2 text-sm"
                         />
                       </div>
                     ) : (
@@ -3757,7 +3832,7 @@ const LifterManagementPage = () => {
             })}
             {visibleLifters.length === 0 && (
               <tr>
-                <td colSpan={11} className="px-4 py-5 text-center text-slate-300">
+                <td colSpan={12} className="px-4 py-5 text-center text-slate-300">
                   No lifters in this filter.
                 </td>
               </tr>
@@ -5782,9 +5857,10 @@ const ResultsPage = () => {
   };
 
   const filteredLifters = useMemo(() => {
+    const eligible = lifters.filter((lifter) => !lifter.disqualified);
     const query = searchTerm.trim().toLowerCase();
-    if (!query) return lifters;
-    return lifters.filter((lifter) => {
+    if (!query) return eligible;
+    return eligible.filter((lifter) => {
       const haystack = `${lifter.name} ${lifter.team} ${lifter.group} ${lifter.weightClass}`.toLowerCase();
       return haystack.includes(query);
     });
@@ -5793,16 +5869,17 @@ const ResultsPage = () => {
   const ranking = useMemo(
     () =>
       [...lifters]
+        .filter((l) => !l.disqualified)
         .map((l) => {
           const squat = bestLift(l.squatAttempts);
           const bench = bestLift(l.benchAttempts);
           const deadlift = bestLift(l.deadliftAttempts);
-          const total = squat + bench + deadlift;
-          const glPoints = calculateGoodliftPoints(total, l.bodyweight, l.sex);
+          const total = isBenchOnly ? bench : squat + bench + deadlift;
+          const glPoints = calculateGoodliftPoints(total, l.bodyweight, l.sex, competitionMode);
           return { ...l, squat, bench, deadlift, total, glPoints };
         })
         .sort((a, b) => b.glPoints - a.glPoints),
-    [lifters],
+    [lifters, competitionMode, isBenchOnly],
   );
 
   return (
@@ -5833,6 +5910,7 @@ const ResultsPage = () => {
               <th className="px-4 py-3">Lifter</th>
               <th className="px-4 py-3">Group</th>
               <th className="px-4 py-3">Team</th>
+              <th className="px-4 py-3">Body weight</th>
               {!isBenchOnly && (
                 <>
                   <th className="px-4 py-3">SQ1</th>
@@ -5917,6 +5995,9 @@ const ResultsPage = () => {
                     <td className="px-4 py-3 font-semibold">{r.name}</td>
                     <td className="px-4 py-3">{r.group || "-"}</td>
                     <td className="px-4 py-3">{r.team || "-"}</td>
+                    <td className="px-4 py-3 tabular-nums text-slate-300">
+                      {typeof r.bodyweight === "number" ? `${r.bodyweight} kg` : "-"}
+                    </td>
                     {!isBenchOnly && (
                       <>
                         {renderEditor("squat", 0)}
@@ -6061,6 +6142,9 @@ const ResultsTable = memo(({
         </td>
         <td className="px-3 py-2 hidden md:table-cell text-slate-400 text-xs">{displayCategory}</td>
         <td className="px-3 py-2 hidden md:table-cell text-slate-400">{lifter.team || "-"}</td>
+        <td className="px-3 py-2 hidden md:table-cell tabular-nums text-slate-400">
+          {typeof lifter.bodyweight === "number" ? `${lifter.bodyweight} kg` : "-"}
+        </td>
         {!isBenchOnly && (
           <>
             <AttemptDisplayCell attempt={lifter.squatAttempts[0]} />
@@ -6091,6 +6175,7 @@ const ResultsTable = memo(({
         <th className="px-3 py-2">Lifter</th>
         <th className="px-3 py-2 hidden md:table-cell">Category</th>
         <th className="px-3 py-2 hidden md:table-cell">Team</th>
+        <th className="px-3 py-2 hidden md:table-cell">Body weight</th>
         {!isBenchOnly && (
           <>
             <th className="px-3 py-2">SQ1</th>
@@ -6135,7 +6220,7 @@ const ResultsTable = memo(({
               <tbody>
                 {members.length === 0 && (
                   <tr>
-                    <td colSpan={isBenchOnly ? 9 : 15} className="px-3 py-4 text-center text-slate-500 text-xs">No lifters in this group.</td>
+                    <td colSpan={isBenchOnly ? 10 : 16} className="px-3 py-4 text-center text-slate-500 text-xs">No lifters in this group.</td>
                   </tr>
                 )}
                 {members.map((lifter, idx) => renderLifterRow(lifter, idx, groupName))}
@@ -6194,6 +6279,7 @@ const DisplayFullPage = () => {
     timerPhase,
     timerEndsAt,
     activeCompetitionGroupName,
+    activeCompetitionName,
     competitionMode,
     groups,
   } = useAppContext();
@@ -6256,6 +6342,30 @@ const DisplayFullPage = () => {
   }, [timerEndsAt]);
 
   const displayTimerSeconds = timerEndsAt ? Math.max(0, Math.ceil((timerEndsAt - now) / 1000)) : 0;
+
+  const platformTimerChip =
+    timerPhase === "ATTEMPT" && timerEndsAt ? (
+      <div
+        className={`pointer-events-none fixed left-4 bottom-10 z-[45] max-w-[min(96vw,22rem)] rounded-2xl border-2 px-6 py-5 shadow-xl backdrop-blur-md ${
+          isDarkTheme
+            ? "border-amber-400/40 bg-black/55 text-amber-100"
+            : "border-amber-600/35 bg-white/90 text-amber-950"
+        }`}
+      >
+        <p
+          className={`text-sm font-semibold uppercase tracking-[0.18em] ${isDarkTheme ? "text-white/70" : "text-slate-600"}`}
+        >
+          Platform timer
+        </p>
+        <p
+          className={`mt-2 text-[clamp(2rem,6.5vw,3.75rem)] font-black tabular-nums leading-none ${
+            isDarkTheme ? "text-amber-300" : "text-amber-800"
+          }`}
+        >
+          {Math.floor(displayTimerSeconds / 60)}:{String(displayTimerSeconds % 60).padStart(2, "0")}
+        </p>
+      </div>
+    ) : null;
 
   useEffect(() => {
     if (!currentLifterId && currentLifter) {
@@ -6336,16 +6446,18 @@ const DisplayFullPage = () => {
   const ranking = useMemo(
     () =>
       [...rankingSourceLifters]
+        .filter((l) => !l.disqualified)
         .map((l) => {
           const squat = bestLift(l.squatAttempts);
           const bench = bestLift(l.benchAttempts);
           const deadlift = bestLift(l.deadliftAttempts);
-          const total = squat + bench + deadlift;
-          const points = calculateGoodliftPoints(total, l.bodyweight, l.sex);
+          const isBenchOnlyMode = competitionMode === "BENCH_ONLY";
+          const total = isBenchOnlyMode ? bench : squat + bench + deadlift;
+          const points = calculateGoodliftPoints(total, l.bodyweight, l.sex, competitionMode);
           return { ...l, total, points };
         })
         .sort((a, b) => b.points - a.points),
-    [rankingSourceLifters],
+    [rankingSourceLifters, competitionMode],
   );
 
   const isDualCategory = (category: string) => category.includes(" + ");
@@ -6398,12 +6510,70 @@ const DisplayFullPage = () => {
     currentOrderIndex >= 0
       ? orderedByCurrentRound[currentOrderIndex + 1] ?? null
       : orderedByCurrentRound[1] ?? null;
-  const nextLifterWeight =
-    nextLifter ? resolveAttemptWeight(nextLifter, currentLift, currentAttemptIndex) : null;
   const nextLoadingWeight =
-    nextLifterWeight !== null
-      ? nextLifterWeight + (includeCollars ? COLLAR_PAIR_KG : 0)
-      : null;
+    nextLifter ? resolveAttemptWeight(nextLifter, currentLift, currentAttemptIndex) : null;
+
+  /** Compact lifting order — above plate / bar diagram, centered (not duplicated on order_attempts layout) */
+  const showLiftingOrderAbovePlate =
+    orderedByCurrentRound.length > 0 && displayMode !== "order_attempts";
+
+  const scoreboardLiftingOrderStrip = !showLiftingOrderAbovePlate ? null : (
+    <div className="flex w-full shrink-0 justify-center border-b border-white/10 bg-black/25 py-2 md:py-2.5">
+      <div className="w-full max-w-6xl px-2">
+        <p className="mb-1.5 text-center text-[9px] font-semibold uppercase tracking-[0.16em] text-cyan-400/90 md:text-[10px]">
+          {currentLift.toUpperCase()} · Attempt {currentAttemptIndex + 1}
+          {activeCompetitionGroupName ? (
+            <span className="font-normal normal-case tracking-normal text-slate-400"> · {activeCompetitionGroupName}</span>
+          ) : null}
+        </p>
+        <div className="flex justify-center overflow-x-auto [-webkit-overflow-scrolling:touch]">
+          <div className="flex w-max gap-2 px-1 pb-0.5 snap-x snap-mandatory md:gap-2.5">
+            {orderedByCurrentRound.map((lifter, idx) => {
+              const isCurrent = lifter.id === currentLifterId;
+              const attemptWeight = getAttemptValue(lifter, currentLift, currentAttemptIndex);
+              const groupLabel =
+                lifter.group && !activeCompetitionGroupName
+                  ? Array.isArray(lifter.group)
+                    ? lifter.group.join(" + ")
+                    : lifter.group
+                  : "";
+              return (
+                <div
+                  key={`scoreboard-order-${lifter.id}`}
+                  className={`snap-start flex min-w-[9.25rem] max-w-[13rem] shrink-0 flex-col gap-1 rounded-lg border px-2.5 py-2 text-center shadow-sm sm:min-w-[10rem] ${
+                    isCurrent ? "border-cyan-400/80 bg-cyan-500/20 ring-1 ring-cyan-400/35" : "border-white/15 bg-black/35"
+                  }`}
+                >
+                  <div className="flex items-center justify-center gap-1.5">
+                    <span className="text-[9px] font-bold tabular-nums text-cyan-300/95 md:text-[10px]">#{idx + 1}</span>
+                    {isCurrent ? (
+                      <span className="rounded bg-cyan-500/50 px-1.5 py-0 text-[8px] font-black uppercase tracking-wider text-white">
+                        Now
+                      </span>
+                    ) : null}
+                  </div>
+                  <p className="line-clamp-2 text-[clamp(0.85rem,2.4vw,1.2rem)] font-black uppercase leading-snug tracking-tight text-white">
+                    {lifter.name || "-"}
+                  </p>
+                  <p className="text-[11px] font-bold tabular-nums text-amber-200 md:text-xs">
+                    {attemptWeight === null ? "— kg" : `${attemptWeight.toFixed(1)} kg`}
+                  </p>
+                  <p className="text-[8px] tabular-nums leading-tight text-slate-400 md:text-[9px]">
+                    BW {typeof lifter.bodyweight === "number" ? `${lifter.bodyweight}` : "—"} · Lot{" "}
+                    {typeof lifter.lot === "number" ? lifter.lot : "—"}
+                    {lifter.weightClass ? ` · ${lifter.weightClass}` : ""}
+                  </p>
+                  {groupLabel ? (
+                    <p className="truncate text-[8px] font-semibold uppercase tracking-wide text-amber-400/85">{groupLabel}</p>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 
   if (displayMode === "ipf_plate") {
     return (
@@ -6429,32 +6599,39 @@ const DisplayFullPage = () => {
             </p>
             <p className="mt-2 text-[clamp(2rem,6vw,4.6rem)] font-black uppercase leading-tight">{currentLifter?.name || "NO LIFTER"}</p>
             <p className="mt-2 text-[clamp(2.6rem,8vw,5.5rem)] font-bold leading-tight">{loadingWeight.toFixed(1)} kg</p>
-            {timerPhase === "ATTEMPT" && timerEndsAt && (
-              <p className="mt-2 text-xl font-bold text-cyan-300 md:text-3xl">
-                Timer: {Math.floor(displayTimerSeconds / 60)}:{String(displayTimerSeconds % 60).padStart(2, "0")}
-              </p>
-            )}
           </div>
 
-          <PlateStack weight={loadingWeight} includeCollars={includeCollars} />
-
-          {nextLifter && (
-            <div className="mx-auto mt-4 max-w-3xl rounded-xl border border-cyan-400/30 bg-cyan-900/15 px-4 py-3 text-left">
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">Next Lifter</p>
-              <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
-                <p className="text-[clamp(1rem,2.4vw,1.6rem)] font-black uppercase text-cyan-100">{nextLifter.name || "-"}</p>
-                <p className="text-[clamp(1rem,2.2vw,1.5rem)] font-bold text-cyan-200">
-                  {nextLoadingWeight !== null ? `${nextLoadingWeight.toFixed(1)} kg` : "-"}
-                </p>
+          <div className="mt-2 grid grid-cols-2 gap-3 divide-x divide-cyan-400/25 md:gap-6">
+            <div className="min-w-0 pr-2 md:pr-4">
+              <p className="text-center text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Current</p>
+              <p className="mt-0.5 truncate text-center text-[clamp(0.85rem,2vw,1.15rem)] font-black uppercase text-white">
+                {currentLifter?.name || "—"}
+              </p>
+              <div className="mt-2">
+                <PlateStack weight={loadingWeight} includeCollars={includeCollars} />
               </div>
-              {nextLoadingWeight !== null && (
-                <div className="mt-3 rounded-lg border border-cyan-300/20 bg-black/25 p-2">
-                  <PlateStack weight={nextLoadingWeight} includeCollars={includeCollars} />
+            </div>
+            <div className="min-w-0 pl-2 md:pl-4">
+              <p className="text-center text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Next</p>
+              {nextLifter && nextLoadingWeight !== null ? (
+                <>
+                  <p className="mt-0.5 truncate text-center text-[clamp(0.85rem,2vw,1.15rem)] font-black uppercase text-cyan-100">
+                    {nextLifter.name || "—"}
+                  </p>
+                  <div className="mt-2">
+                    <PlateStack weight={nextLoadingWeight} includeCollars={includeCollars} />
+                  </div>
+                </>
+              ) : (
+                <div className="mt-2 flex min-h-[200px] flex-col items-center justify-center rounded-2xl border border-white/10 bg-black/25 px-3 py-6 text-center md:min-h-[240px]">
+                  <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">No next lifter</p>
                 </div>
               )}
             </div>
-          )}
+          </div>
         </div>
+
+        {platformTimerChip}
 
         <button
           onClick={cycleDisplayTheme}
@@ -6487,11 +6664,6 @@ const DisplayFullPage = () => {
               <p className="text-[clamp(0.9rem,2vw,1.4rem)] font-bold">
                 {loadingWeight.toFixed(1)} kg
               </p>
-              {timerPhase === "ATTEMPT" && timerEndsAt && (
-                <p className="text-[clamp(0.8rem,1.8vw,1.2rem)] font-bold text-amber-300">
-                  ⏱ {Math.floor(displayTimerSeconds / 60)}:{String(displayTimerSeconds % 60).padStart(2, "0")}
-                </p>
-              )}
             </div>
           </div>
           {!competitionStarted && !forceLive && (
@@ -6501,11 +6673,36 @@ const DisplayFullPage = () => {
           )}
         </div>
 
-        {/* ── Middle: plate section (template 1 only) ── */}
+        {scoreboardLiftingOrderStrip}
+
+        {/* ── Middle: plate section — current (left) / next (right) ── */}
         {hasPlate && (
-          <div className="flex-none flex flex-wrap items-center gap-3 border-b border-white/10 px-3 py-2 md:px-5 md:py-3">
-            <div className="flex-1 min-w-0">
-              <PlateStack weight={loadingWeight} includeCollars={includeCollars} />
+          <div className="flex-none border-b border-white/10 px-3 py-2 md:px-5 md:py-3">
+            <div className="grid grid-cols-2 gap-2 divide-x divide-white/15 md:gap-4">
+              <div className="min-w-0 pr-2 md:pr-4">
+                <p className="text-center text-[9px] font-semibold uppercase tracking-[0.18em] text-cyan-300 md:text-[10px]">
+                  Current
+                </p>
+                <p className="truncate text-center text-[10px] font-bold text-white md:text-xs">{currentLifter?.name || "—"}</p>
+                <div className="mt-1 min-w-0">
+                  <PlateStack weight={loadingWeight} includeCollars={includeCollars} />
+                </div>
+              </div>
+              <div className="min-w-0 pl-2 md:pl-4">
+                <p className="text-center text-[9px] font-semibold uppercase tracking-[0.18em] text-cyan-300 md:text-[10px]">Next</p>
+                {nextLifter && nextLoadingWeight !== null ? (
+                  <>
+                    <p className="truncate text-center text-[10px] font-bold text-cyan-100 md:text-xs">{nextLifter.name || "—"}</p>
+                    <div className="mt-1 min-w-0">
+                      <PlateStack weight={nextLoadingWeight} includeCollars={includeCollars} />
+                    </div>
+                  </>
+                ) : (
+                  <div className="mt-1 flex min-h-[160px] flex-col items-center justify-center rounded-xl border border-white/10 bg-black/30 px-2 py-6 text-center md:min-h-[200px]">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 md:text-xs">No next lifter</p>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -6524,69 +6721,44 @@ const DisplayFullPage = () => {
                   )}
                 </p>
               </div>
-              <div className="grid flex-none gap-2 md:grid-cols-3">
-                {orderedByCurrentRound.slice(0, 3).map((lifter, idx) => {
-                  const attemptWeight = getAttemptValue(lifter, currentLift, currentAttemptIndex);
-                  return (
-                    <div
-                      key={lifter.id}
-                      className={`rounded-xl border p-3 md:p-4 ${
-                        lifter.id === currentLifterId ? "border-cyan-300/80 bg-cyan-500/15" : "border-white/20 bg-black/30"
-                      }`}
-                    >
-                      <p className="text-[10px] font-semibold uppercase tracking-widest text-cyan-200">#{idx + 1}</p>
-                      <p className="mt-1 text-[clamp(1rem,2.5vw,2rem)] font-black uppercase leading-tight">{lifter.name || "-"}</p>
-                      {lifter.group && !activeCompetitionGroupName && (
-                        <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-widest text-amber-300/80">{Array.isArray(lifter.group) ? lifter.group.join(" + ") : lifter.group}</p>
-                      )}
-                      <p className="mt-1 text-[clamp(0.9rem,2vw,1.6rem)] font-bold">
-                        {attemptWeight === null ? "-" : `${attemptWeight.toFixed(1)} kg`}
-                      </p>
-                      <p className="mt-1 text-xs text-slate-300">
-                        BW {typeof lifter.bodyweight === "number" ? lifter.bodyweight : "-"} · Lot {typeof lifter.lot === "number" ? lifter.lot : "-"}
-                      </p>
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="rounded-xl border border-white/15 bg-black/20 p-3">
-                <p className="mb-2 text-[10px] uppercase tracking-widest text-cyan-300">Other Lifters</p>
-                <div className="space-y-1">
-                  {(() => {
-                    const rest = orderedByCurrentRound.slice(3);
-                    const rows: React.ReactNode[] = [];
-                    let lastGroup: string | undefined = undefined;
-                    rest.forEach((lifter, idx) => {
-                      const attemptWeight = getAttemptValue(lifter, currentLift, currentAttemptIndex);
-                      const groupDisplay = Array.isArray(lifter.group) ? lifter.group.join(" + ") : lifter.group;
-                      if (!activeCompetitionGroupName && groupDisplay && groupDisplay !== lastGroup) {
-                        lastGroup = groupDisplay;
-                        rows.push(
-                          <div key={`group-sep-${groupDisplay}-${idx}`} className="px-1 pt-1 pb-0.5">
-                            <span className="text-[10px] font-bold uppercase tracking-widest text-amber-300/80">{groupDisplay}</span>
-                          </div>
-                        );
-                      }
-                      rows.push(
-                        <div
-                          key={lifter.id}
-                          className={`flex items-center justify-between rounded-lg border px-3 py-1.5 text-sm ${
-                            lifter.id === currentLifterId ? "border-cyan-300/70 bg-cyan-500/10" : "border-white/10 bg-white/5"
-                          }`}
-                        >
-                          <span className="font-semibold">{idx + 4}. {lifter.name}</span>
-                          <span className="text-slate-300 text-xs">
-                            {attemptWeight === null ? "-" : `${attemptWeight.toFixed(1)} kg`} · BW {typeof lifter.bodyweight === "number" ? lifter.bodyweight : "-"} · Lot {typeof lifter.lot === "number" ? lifter.lot : "-"}
-                          </span>
-                        </div>
-                      );
-                    });
-                    return rows;
-                  })()}
-                  {orderedByCurrentRound.length === 0 && (
-                    <p className="text-sm text-slate-400">No lifters added yet.</p>
-                  )}
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
+                <p className="shrink-0 text-[10px] uppercase tracking-widest text-cyan-300">
+                  Lifting order <span className="font-normal normal-case tracking-normal text-slate-500">— scroll sideways</span>
+                </p>
+                <div className="flex min-h-0 gap-2 overflow-x-auto overflow-y-hidden pb-1 [-webkit-overflow-scrolling:touch] snap-x snap-mandatory">
+                  {orderedByCurrentRound.map((lifter, idx) => {
+                    const attemptWeight = getAttemptValue(lifter, currentLift, currentAttemptIndex);
+                    const isCurrent = lifter.id === currentLifterId;
+                    return (
+                      <div
+                        key={lifter.id}
+                        className={`snap-start shrink-0 rounded-xl border p-3 shadow-sm ${
+                          isCurrent ? "border-cyan-300/90 bg-cyan-500/15 ring-1 ring-cyan-400/40" : "border-white/20 bg-black/30"
+                        } w-[min(42vw,11rem)] sm:w-[10.5rem]`}
+                      >
+                        <p className="text-[10px] font-semibold uppercase tracking-widest text-cyan-200">#{idx + 1}</p>
+                        <p className="mt-1 line-clamp-2 text-[clamp(0.85rem,2vw,1.15rem)] font-black uppercase leading-tight">
+                          {lifter.name || "-"}
+                        </p>
+                        {lifter.group && !activeCompetitionGroupName && (
+                          <p className="mt-0.5 truncate text-[9px] font-semibold uppercase tracking-widest text-amber-300/85">
+                            {Array.isArray(lifter.group) ? lifter.group.join(" + ") : lifter.group}
+                          </p>
+                        )}
+                        <p className="mt-1 text-[clamp(0.95rem,2.2vw,1.35rem)] font-bold tabular-nums">
+                          {attemptWeight === null ? "-" : `${attemptWeight.toFixed(1)} kg`}
+                        </p>
+                        <p className="mt-1 text-[11px] tabular-nums text-slate-400">
+                          BW {typeof lifter.bodyweight === "number" ? lifter.bodyweight : "-"} · Lot{" "}
+                          {typeof lifter.lot === "number" ? lifter.lot : "-"}
+                        </p>
+                      </div>
+                    );
+                  })}
                 </div>
+                {orderedByCurrentRound.length === 0 && (
+                  <p className="text-sm text-slate-400">No lifters added yet.</p>
+                )}
               </div>
             </div>
           ) : groups.length === 0 ? (
@@ -6600,13 +6772,38 @@ const DisplayFullPage = () => {
               </p>
             </div>
           ) : (
-            <ResultsTable
-              rankingByGroup={rankingByGroup}
-              ungroupedRanking={ungroupedRanking}
-              currentLifterId={currentLifterId}
-              isDarkTheme={isDarkTheme}
-              competitionMode={competitionMode}
-            />
+            <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
+              <div className="flex shrink-0 justify-end">
+                <button
+                  type="button"
+                  onClick={() =>
+                    downloadScoreboardPdf({
+                      competitionName: activeCompetitionName,
+                      competitionMode,
+                      activeGroupFilter: activeCompetitionGroupName,
+                      rankingByGroup,
+                      ungroupedRanking,
+                    })
+                  }
+                  className={`rounded-lg border px-3 py-1.5 text-xs font-semibold uppercase tracking-wide ${
+                    isDarkTheme
+                      ? "border-cyan-400/50 bg-cyan-500/15 text-cyan-200 hover:bg-cyan-500/25"
+                      : "border-slate-300 bg-white text-slate-800 hover:bg-slate-50"
+                  }`}
+                >
+                  Download PDF
+                </button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-hidden">
+                <ResultsTable
+                  rankingByGroup={rankingByGroup}
+                  ungroupedRanking={ungroupedRanking}
+                  currentLifterId={currentLifterId}
+                  isDarkTheme={isDarkTheme}
+                  competitionMode={competitionMode}
+                />
+              </div>
+            </div>
           )}
         </div>
 
@@ -6757,6 +6954,8 @@ const DisplayFullPage = () => {
           </div>
         )}
 
+        {platformTimerChip}
+
         <button
           onClick={cycleDisplayTheme}
           className={themeButtonClass.replace("top-4", "bottom-4")}
@@ -6791,9 +6990,6 @@ const DisplayFullPage = () => {
           <h1 className="text-4xl font-bold italic uppercase md:text-6xl">{currentLifter?.name || "No Lifter"}</h1>
             <div className="text-right">
               <p className="text-xl font-semibold md:text-4xl">Height: {currentLift === "bench" ? currentLifter?.rackHeightBench || "-" : currentLifter?.rackHeightSquat || "-"}</p>
-              {timerPhase === "ATTEMPT" && timerEndsAt && (
-                <p className="mt-1 text-2xl font-bold md:text-4xl">Timer {Math.floor(displayTimerSeconds / 60)}:{String(displayTimerSeconds % 60).padStart(2, "0")}</p>
-              )}
             </div>
         </div>
 
@@ -6807,7 +7003,30 @@ const DisplayFullPage = () => {
               {currentLift.toUpperCase()} ATTEMPT {currentAttemptIndex + 1}
             </p>
           </div>
-          <PlateStack weight={loadingWeight} includeCollars={includeCollars} />
+          <div className="grid min-h-0 min-w-0 grid-cols-2 gap-2 divide-x divide-black/15">
+            <div className="min-w-0 pr-2">
+              <p className="text-center text-[9px] font-semibold uppercase text-slate-600">Current</p>
+              <p className="truncate text-center text-[10px] font-bold">{currentLifter?.name || "—"}</p>
+              <div className="mt-1">
+                <PlateStack weight={loadingWeight} includeCollars={includeCollars} />
+              </div>
+            </div>
+            <div className="min-w-0 pl-2">
+              <p className="text-center text-[9px] font-semibold uppercase text-slate-600">Next</p>
+              {nextLifter && nextLoadingWeight !== null ? (
+                <>
+                  <p className="truncate text-center text-[10px] font-bold text-slate-800">{nextLifter.name || "—"}</p>
+                  <div className="mt-1">
+                    <PlateStack weight={nextLoadingWeight} includeCollars={includeCollars} />
+                  </div>
+                </>
+              ) : (
+                <div className="mt-1 flex min-h-[140px] flex-col items-center justify-center rounded-xl border border-black/10 bg-black/5 px-2 py-4 text-center">
+                  <p className="text-xs text-slate-500">No next lifter</p>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -6845,6 +7064,8 @@ const DisplayFullPage = () => {
       <Link to="/control" className="fixed bottom-4 right-4 rounded bg-black/70 px-3 py-2 text-sm text-white">
         Back
       </Link>
+
+      {platformTimerChip}
 
       <button onClick={cycleDisplayTheme} className={themeButtonClass}>
         Theme: {activeTheme.label}
