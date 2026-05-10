@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -590,6 +591,43 @@ const getAttemptValue = (lifter: Lifter, lift: LiftType, attemptIndex: number) =
     if (Number.isFinite(parsed)) return parsed;
   }
   return null;
+};
+
+/** Split display name into first token vs rest (for board-style FIRST LAST lines). */
+const splitLifterNameParts = (fullName: string): { first: string; last: string } => {
+  const t = fullName.trim();
+  if (!t) return { first: "-", last: "" };
+  const parts = t.split(/\s+/);
+  if (parts.length === 1) return { first: parts[0] ?? "-", last: "" };
+  return { first: parts[0] ?? "-", last: parts.slice(1).join(" ") };
+};
+
+/** Nearest ancestor that scrolls horizontally (for manual centering; scrollIntoView inline:center is unreliable in nested flex). */
+const findHorizontalScrollParent = (start: HTMLElement | null): HTMLElement | null => {
+  let el = start?.parentElement ?? null;
+  while (el) {
+    const ox = getComputedStyle(el).overflowX;
+    if ((ox === "auto" || ox === "scroll" || ox === "overlay") && el.scrollWidth > el.clientWidth + 2) {
+      return el;
+    }
+    el = el.parentElement;
+  }
+  return null;
+};
+
+/** Center element horizontally inside its overflow-x scroll parent (uses geometry, not scrollIntoView). */
+const centerLifterOrderNodeInScrollParent = (el: HTMLElement) => {
+  const scrollParent = findHorizontalScrollParent(el);
+  if (!scrollParent) return;
+  const elRect = el.getBoundingClientRect();
+  const parentRect = scrollParent.getBoundingClientRect();
+  const relLeft = elRect.left - parentRect.left;
+  const relMid = relLeft + elRect.width / 2;
+  const viewMid = parentRect.width / 2;
+  const error = relMid - viewMid;
+  const maxScroll = Math.max(0, scrollParent.scrollWidth - scrollParent.clientWidth);
+  const next = Math.max(0, Math.min(scrollParent.scrollLeft + error, maxScroll));
+  scrollParent.scrollTo({ left: next, behavior: "auto" });
 };
 
 const getBodyweightValue = (lifter: Lifter) => {
@@ -6597,67 +6635,30 @@ const DisplayFullPage = () => {
   const nextLoadingWeight =
     nextLifter ? resolveAttemptWeight(nextLifter, currentLift, currentAttemptIndex) : null;
 
-  /** Compact lifting order — above plate / bar diagram, centered (not duplicated on order_attempts layout) */
-  const showLiftingOrderAbovePlate =
-    orderedByCurrentRound.length > 0 && displayMode !== "order_attempts";
-
-  const scoreboardLiftingOrderStrip = !showLiftingOrderAbovePlate ? null : (
-    <div className="flex w-full shrink-0 justify-center border-b border-white/10 bg-black/25 py-2 md:py-2.5">
-      <div className="w-full max-w-6xl px-2">
-        <p className="mb-1.5 text-center text-[9px] font-semibold uppercase tracking-[0.16em] text-cyan-400/90 md:text-[10px]">
-          {currentLift.toUpperCase()} · Attempt {currentAttemptIndex + 1}
-          {activeCompetitionGroupName ? (
-            <span className="font-normal normal-case tracking-normal text-slate-400"> · {activeCompetitionGroupName}</span>
-          ) : null}
-        </p>
-        <div className="flex justify-center overflow-x-auto [-webkit-overflow-scrolling:touch]">
-          <div className="flex w-max gap-2 px-1 pb-0.5 snap-x snap-mandatory md:gap-2.5">
-            {orderedByCurrentRound.map((lifter, idx) => {
-              const isCurrent = lifter.id === currentLifterId;
-              const attemptWeight = getAttemptValue(lifter, currentLift, currentAttemptIndex);
-              const groupLabel =
-                lifter.group && !activeCompetitionGroupName
-                  ? Array.isArray(lifter.group)
-                    ? lifter.group.join(" + ")
-                    : lifter.group
-                  : "";
-              return (
-                <div
-                  key={`scoreboard-order-${lifter.id}`}
-                  className={`snap-start flex min-w-[9.25rem] max-w-[13rem] shrink-0 flex-col gap-1 rounded-lg border px-2.5 py-2 text-center shadow-sm sm:min-w-[10rem] ${
-                    isCurrent ? "border-cyan-400/80 bg-cyan-500/20 ring-1 ring-cyan-400/35" : "border-white/15 bg-black/35"
-                  }`}
-                >
-                  <div className="flex items-center justify-center gap-1.5">
-                    <span className="text-[9px] font-bold tabular-nums text-cyan-300/95 md:text-[10px]">#{idx + 1}</span>
-                    {isCurrent ? (
-                      <span className="rounded bg-cyan-500/50 px-1.5 py-0 text-[8px] font-black uppercase tracking-wider text-white">
-                        Now
-                      </span>
-                    ) : null}
-                  </div>
-                  <p className="line-clamp-2 text-[clamp(0.85rem,2.4vw,1.2rem)] font-black uppercase leading-snug tracking-tight text-white">
-                    {lifter.name || "-"}
-                  </p>
-                  <p className="text-[11px] font-bold tabular-nums text-amber-200 md:text-xs">
-                    {attemptWeight === null ? "— kg" : `${attemptWeight.toFixed(1)} kg`}
-                  </p>
-                  <p className="text-[8px] tabular-nums leading-tight text-slate-400 md:text-[9px]">
-                    BW {typeof lifter.bodyweight === "number" ? `${lifter.bodyweight}` : "—"} · Lot{" "}
-                    {typeof lifter.lot === "number" ? lifter.lot : "—"}
-                    {lifter.weightClass ? ` · ${lifter.weightClass}` : ""}
-                  </p>
-                  {groupLabel ? (
-                    <p className="truncate text-[8px] font-semibold uppercase tracking-wide text-amber-400/85">{groupLabel}</p>
-                  ) : null}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  /** Scroll horizontal lifting-order strips so the active lifter stays visually centered (manual scrollLeft — scrollIntoView is flaky in flex + overflow). */
+  useLayoutEffect(() => {
+    if (!currentLifterId || orderedByCurrentRound.length <= 1) return;
+    const idAttr = typeof CSS !== "undefined" && typeof CSS.escape === "function" ? CSS.escape(currentLifterId) : currentLifterId;
+    let alive = true;
+    const run = () => {
+      if (!alive) return;
+      const nodes = document.querySelectorAll<HTMLElement>(`[data-display-order-lifter="${idAttr}"]`);
+      nodes.forEach((node) => centerLifterOrderNodeInScrollParent(node));
+    };
+    const raf1 = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (!alive) return;
+        run();
+        window.setTimeout(() => {
+          if (alive) run();
+        }, 120);
+      });
+    });
+    return () => {
+      alive = false;
+      cancelAnimationFrame(raf1);
+    };
+  }, [currentLifterId, orderedByCurrentRound, displayMode, currentLift, currentAttemptIndex]);
 
   if (displayMode === "ipf_plate") {
     return (
@@ -6757,8 +6758,6 @@ const DisplayFullPage = () => {
           )}
         </div>
 
-        {scoreboardLiftingOrderStrip}
-
         {/* ── Middle: plate section — current (left) / next (right) ── */}
         {hasPlate && (
           <div className="flex-none border-b border-white/10 px-3 py-2 md:px-5 md:py-3">
@@ -6809,36 +6808,42 @@ const DisplayFullPage = () => {
                 <p className="shrink-0 text-[10px] uppercase tracking-widest text-cyan-300">
                   Lifting order <span className="font-normal normal-case tracking-normal text-slate-500">— scroll sideways</span>
                 </p>
-                <div className="flex min-h-0 gap-2 overflow-x-auto overflow-y-hidden pb-1 [-webkit-overflow-scrolling:touch] snap-x snap-mandatory">
-                  {orderedByCurrentRound.map((lifter, idx) => {
-                    const attemptWeight = getAttemptValue(lifter, currentLift, currentAttemptIndex);
-                    const isCurrent = lifter.id === currentLifterId;
-                    return (
-                      <div
-                        key={lifter.id}
-                        className={`snap-start shrink-0 rounded-xl border p-3 shadow-sm ${
-                          isCurrent ? "border-cyan-300/90 bg-cyan-500/15 ring-1 ring-cyan-400/40" : "border-white/20 bg-black/30"
-                        } w-[min(42vw,11rem)] sm:w-[10.5rem]`}
-                      >
-                        <p className="text-[10px] font-semibold uppercase tracking-widest text-cyan-200">#{idx + 1}</p>
-                        <p className="mt-1 line-clamp-2 text-[clamp(0.85rem,2vw,1.15rem)] font-black uppercase leading-tight">
-                          {lifter.name || "-"}
-                        </p>
-                        {lifter.group && !activeCompetitionGroupName && (
-                          <p className="mt-0.5 truncate text-[9px] font-semibold uppercase tracking-widest text-amber-300/85">
-                            {Array.isArray(lifter.group) ? lifter.group.join(" + ") : lifter.group}
+                <div className="min-h-0 overflow-x-auto overflow-y-hidden pb-1 [-webkit-overflow-scrolling:touch]">
+                  <div className="flex w-max snap-x snap-mandatory gap-2 pl-[max(0.5rem,calc(50%-6rem))] pr-[max(0.5rem,calc(50%-6rem))]">
+                    {orderedByCurrentRound.map((lifter, idx) => {
+                      const attemptWeight = getAttemptValue(lifter, currentLift, currentAttemptIndex);
+                      const isCurrent = lifter.id === currentLifterId;
+                      const { first, last } = splitLifterNameParts(lifter.name || "");
+                      return (
+                        <div
+                          key={lifter.id}
+                          data-display-order-lifter={lifter.id}
+                          className={`snap-start shrink-0 rounded-xl border p-3 shadow-sm ${
+                            isCurrent ? "border-cyan-300/90 bg-cyan-500/15 ring-1 ring-cyan-400/40" : "border-white/20 bg-black/30"
+                          } w-[min(46vw,12.5rem)] sm:w-[11.5rem]`}
+                        >
+                          <p className="text-[clamp(0.72rem,2.1vw,0.95rem)] font-black uppercase leading-snug tracking-tight text-white">
+                            <span className="tabular-nums text-cyan-200">#{idx + 1}</span>{" "}
+                            <span>{first.toUpperCase()}</span>
+                            {last ? <> <span>{last.toUpperCase()}</span></> : null}{" "}
+                            <span className="font-bold text-slate-500">*</span>{" "}
+                            <span className="tabular-nums text-amber-200">
+                              {attemptWeight === null ? "—" : `${attemptWeight.toFixed(1)} KG`}
+                            </span>
                           </p>
-                        )}
-                        <p className="mt-1 text-[clamp(0.95rem,2.2vw,1.35rem)] font-bold tabular-nums">
-                          {attemptWeight === null ? "-" : `${attemptWeight.toFixed(1)} kg`}
-                        </p>
-                        <p className="mt-1 text-[11px] tabular-nums text-slate-400">
-                          BW {typeof lifter.bodyweight === "number" ? lifter.bodyweight : "-"} · Lot{" "}
-                          {typeof lifter.lot === "number" ? lifter.lot : "-"}
-                        </p>
-                      </div>
-                    );
-                  })}
+                          {lifter.group && !activeCompetitionGroupName && (
+                            <p className="mt-1 truncate text-[9px] font-semibold uppercase tracking-widest text-amber-300/85">
+                              {Array.isArray(lifter.group) ? lifter.group.join(" + ") : lifter.group}
+                            </p>
+                          )}
+                          <p className="mt-1 text-[11px] tabular-nums text-slate-400">
+                            BW {typeof lifter.bodyweight === "number" ? lifter.bodyweight : "-"} · Lot{" "}
+                            {typeof lifter.lot === "number" ? lifter.lot : "-"}
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
                 {orderedByCurrentRound.length === 0 && (
                   <p className="text-sm text-slate-400">No lifters added yet.</p>
@@ -6878,6 +6883,36 @@ const DisplayFullPage = () => {
                   Download PDF
                 </button>
               </div>
+              {orderedByCurrentRound.length > 0 ? (
+                <div
+                  className={`shrink-0 overflow-x-auto rounded-xl border px-3 py-2 ${
+                    isDarkTheme ? "border-white/15 bg-black/35" : "border-slate-200 bg-slate-50"
+                  }`}
+                >
+                  <p className="whitespace-nowrap pl-[max(0.5rem,calc(50%-6rem))] pr-[max(0.5rem,calc(50%-6rem))] text-[clamp(0.58rem,1.35vw,0.72rem)] font-black uppercase leading-relaxed tracking-wide text-cyan-100">
+                    {orderedByCurrentRound.map((lifter, idx) => {
+                      const w = getAttemptValue(lifter, currentLift, currentAttemptIndex);
+                      const { first, last } = splitLifterNameParts(lifter.name || "");
+                      const namePart = last ? `${first} ${last}` : first;
+                      return (
+                        <span
+                          key={`results-order-inline-${lifter.id}`}
+                          data-display-order-lifter={lifter.id}
+                          className="inline-block scroll-m-1"
+                        >
+                          {idx > 0 ? <span className="mx-1.5 text-slate-500 sm:mx-2.5">|</span> : null}
+                          <span className="tabular-nums text-cyan-300">#{idx + 1}</span>{" "}
+                          <span>{namePart.toUpperCase()}</span>{" "}
+                          <span className={isDarkTheme ? "text-slate-500" : "text-slate-400"}>*</span>{" "}
+                          <span className="tabular-nums text-amber-200">
+                            {w === null ? "—" : `${w.toFixed(1)} KG`}
+                          </span>
+                        </span>
+                      );
+                    })}
+                  </p>
+                </div>
+              ) : null}
               <div className="min-h-0 flex-1 overflow-hidden">
                 <ResultsTable
                   rankingByGroup={rankingByGroup}
