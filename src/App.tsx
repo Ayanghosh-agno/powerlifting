@@ -6536,7 +6536,9 @@ const DisplayFullPage = () => {
       } else {
         setIsFinalVerdictAnimating(true);
         setShowSignalOverlay(false);
-        const allGood = refereeSignals.every((s) => s === "GOOD");
+        /** Same rule as applyRefereeDecision: ≥2 NO → no lift; otherwise good lift (e.g. 2 GOOD + 1 NO). */
+        const noVotes = refereeSignals.filter((s) => s === "NO").length;
+        const verdictIsGood = noVotes < 2;
 
         if (overlayPhaseTimeoutRef.current) window.clearTimeout(overlayPhaseTimeoutRef.current);
         if (overlayHideTimeoutRef.current) window.clearTimeout(overlayHideTimeoutRef.current);
@@ -6550,7 +6552,7 @@ const DisplayFullPage = () => {
           setIsFinalVerdictAnimating(false);
         };
 
-        if (allGood) {
+        if (verdictIsGood) {
           setOverlayPhase("circles");
           overlayPhaseTimeoutRef.current = window.setTimeout(() => setOverlayPhase("lift"), 2000);
           overlayHideTimeoutRef.current = window.setTimeout(() => {
@@ -6998,11 +7000,11 @@ const DisplayFullPage = () => {
           )}
         </div>
 
-        {/* ── IPF Good Lift: Phase 1 — 3 white circles (2 s) ── */}
+        {/* ── Incoming: only cyan balls (one per signal received). White/red wait until all 3 in — see overlayPhase circles. ── */}
         {showSignalOverlay && !overlayPhase && !isFinalVerdictAnimating && liveReceivedSignalCount > 0 && liveReceivedSignalCount < 3 && (
           <div className="pointer-events-none fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/90">
             <div className="flex items-center gap-6 md:gap-10 lg:gap-14">
-              {Array.from({ length: receivedSignalCount }).map((_, idx) => (
+              {Array.from({ length: liveReceivedSignalCount }).map((_, idx) => (
                 <motion.div
                   key={`incoming-signal-${idx}`}
                   initial={{ scale: 0.65, opacity: 0 }}
@@ -7025,15 +7027,23 @@ const DisplayFullPage = () => {
         {overlayPhase === "circles" && (
           <div className="pointer-events-none fixed inset-0 z-50 flex flex-col items-center justify-center bg-black">
             <div className="flex gap-6 md:gap-12 lg:gap-20">
-              {[0, 1, 2].map((idx) => (
-                <motion.div
-                  key={idx}
-                  initial={{ scale: 0, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  transition={{ delay: idx * 0.28, type: "spring", stiffness: 220, damping: 14 }}
-                  className="h-24 w-24 rounded-full bg-white shadow-[0_0_80px_rgba(255,255,255,0.95)] md:h-40 md:w-40 lg:h-52 lg:w-52"
-                />
-              ))}
+              {[0, 1, 2].map((idx) => {
+                const sig = displaySignals[idx];
+                const isGood = sig === "GOOD";
+                return (
+                  <motion.div
+                    key={idx}
+                    initial={{ scale: 0, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ delay: idx * 0.28, type: "spring", stiffness: 220, damping: 14 }}
+                    className={`h-24 w-24 rounded-full border-4 md:h-40 md:w-40 lg:h-52 lg:w-52 ${
+                      isGood
+                        ? "border-white bg-white shadow-[0_0_80px_rgba(255,255,255,0.95)]"
+                        : "border-rose-400 bg-rose-600 shadow-[0_0_75px_rgba(244,63,94,0.92)]"
+                    }`}
+                  />
+                );
+              })}
             </div>
             <motion.p
               initial={{ opacity: 0, y: 20 }}
