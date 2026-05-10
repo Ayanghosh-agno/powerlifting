@@ -39,13 +39,13 @@ import {
   type RefSignal,
   type RefereeSlot,
   type DisplayThemeKey,
+  type DisplayFontFamilyKey,
   type Group,
   type NextAttemptEntry,
   type Lifter,
   type CompetitionRecord,
   type PersistedState,
 } from "./lib/types";
-import { downloadScoreboardPdf } from "./lib/scoreboardPdf";
 import { initializeStateManager } from "./lib/stateManager";
 import { isSupabaseConfigured, supabase } from "./lib/supabase";
 import { useRefereSessionValidation } from "./hooks/useRefereSessionValidation";
@@ -125,6 +125,9 @@ const BAR_WEIGHT_KG = 20;
 const COLLAR_PER_SIDE_KG = 2.5;
 const COLLAR_PAIR_KG = COLLAR_PER_SIDE_KG * 2;
 
+/** Unified typography for scoreboard results tables, flight line, and related strips on the display screen */
+const DISPLAY_RESULTS_BODY = "text-sm leading-snug";
+
 const DISPLAY_THEME_ORDER: DisplayThemeKey[] = ["black", "white", "royal", "emerald", "sepia", "crimson", "graphite"];
 const DISPLAY_THEME_CONFIG: Record<
   DisplayThemeKey,
@@ -132,59 +135,86 @@ const DISPLAY_THEME_CONFIG: Record<
     label: string;
     tone: "dark" | "light";
     rootClass: string;
-    buttonClass: string;
   }
 > = {
   black: {
     label: "Black",
     tone: "dark",
     rootClass: "bg-[#050816] text-white",
-    buttonClass:
-      "fixed right-4 top-4 z-40 rounded-lg border border-white/20 bg-black/60 px-3 py-2 text-xs font-semibold uppercase tracking-[0.15em] text-white",
   },
   white: {
     label: "White",
     tone: "light",
     rootClass: "bg-[#f4f4ef] text-black",
-    buttonClass:
-      "fixed right-4 top-4 z-40 rounded-lg border border-black/20 bg-white/85 px-3 py-2 text-xs font-semibold uppercase tracking-[0.15em] text-black",
   },
   royal: {
     label: "Royal Blue",
     tone: "dark",
     rootClass: "bg-[#0f1f4d] text-white",
-    buttonClass:
-      "fixed right-4 top-4 z-40 rounded-lg border border-cyan-300/40 bg-[#0b1636]/80 px-3 py-2 text-xs font-semibold uppercase tracking-[0.15em] text-cyan-100",
   },
   emerald: {
     label: "Emerald",
     tone: "dark",
     rootClass: "bg-[#042f2e] text-emerald-50",
-    buttonClass:
-      "fixed right-4 top-4 z-40 rounded-lg border border-emerald-200/30 bg-[#02211f]/80 px-3 py-2 text-xs font-semibold uppercase tracking-[0.15em] text-emerald-100",
   },
   sepia: {
     label: "Sepia",
     tone: "light",
     rootClass: "bg-[#f2ead8] text-[#2e261d]",
-    buttonClass:
-      "fixed right-4 top-4 z-40 rounded-lg border border-[#6a5a42]/30 bg-[#f5eddc]/90 px-3 py-2 text-xs font-semibold uppercase tracking-[0.15em] text-[#3a2f20]",
   },
   crimson: {
     label: "Crimson",
     tone: "dark",
     rootClass: "bg-[#2b0712] text-rose-50",
-    buttonClass:
-      "fixed right-4 top-4 z-40 rounded-lg border border-rose-300/35 bg-[#3a0a18]/85 px-3 py-2 text-xs font-semibold uppercase tracking-[0.15em] text-rose-100",
   },
   graphite: {
     label: "Graphite",
     tone: "dark",
     rootClass: "bg-[#15181d] text-slate-100",
-    buttonClass:
-      "fixed right-4 top-4 z-40 rounded-lg border border-slate-300/25 bg-[#0f1216]/85 px-3 py-2 text-xs font-semibold uppercase tracking-[0.15em] text-slate-100",
   },
 };
+
+const DISPLAY_FONT_FAMILY_CONFIG: Record<DisplayFontFamilyKey, string> = {
+  system: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+  condensed: '"Arial Narrow", "Helvetica Neue Condensed", Arial, "Liberation Sans Narrow", sans-serif',
+  mono: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
+  serif: 'Georgia, "Times New Roman", "Times", serif',
+};
+
+const DISPLAY_SCALE_OPTIONS: { value: string; label: string }[] = [
+  { value: "0.75", label: "75%" },
+  { value: "0.85", label: "85%" },
+  { value: "1", label: "100% (default)" },
+  { value: "1.15", label: "115%" },
+  { value: "1.25", label: "125%" },
+  { value: "1.5", label: "150%" },
+  { value: "1.75", label: "175%" },
+  { value: "2", label: "200%" },
+];
+
+function parseDisplayThemeFromSearch(themeParam: string | null): DisplayThemeKey | null {
+  if (!themeParam) return null;
+  return DISPLAY_THEME_ORDER.includes(themeParam as DisplayThemeKey) ? (themeParam as DisplayThemeKey) : null;
+}
+
+function parseDisplayScaleFromSearch(scaleParam: string | null): number {
+  if (!scaleParam) return 1;
+  const n = parseFloat(scaleParam);
+  if (!Number.isFinite(n) || n <= 0) return 1;
+  return Math.min(3, Math.max(0.5, n));
+}
+
+function parseDisplayFontFromSearch(fontParam: string | null): DisplayFontFamilyKey {
+  if (
+    fontParam === "system" ||
+    fontParam === "condensed" ||
+    fontParam === "mono" ||
+    fontParam === "serif"
+  ) {
+    return fontParam;
+  }
+  return "system";
+}
 
 const LOT_NUMBER_OPTIONS = Array.from({ length: 40 }, (_, index) => index + 1);
 
@@ -5699,6 +5729,9 @@ const ScreenPage = () => {
     manualOrderByStage,
   } = useAppContext();
   const [screenType, setScreenType] = useState("signal_results_plate");
+  const [displayVenueTheme, setDisplayVenueTheme] = useState<DisplayThemeKey>("black");
+  const [displayVenueScale, setDisplayVenueScale] = useState("1");
+  const [displayVenueFont, setDisplayVenueFont] = useState<DisplayFontFamilyKey>("system");
 
   const openDisplayScreen = () => {
     const activeCompetitionName =
@@ -5726,7 +5759,8 @@ const ScreenPage = () => {
     const seedValue = encodeUrlSeed(seededCompetition);
     const seedParam = seedValue ? `&seed=${encodeURIComponent(seedValue)}` : "";
     const cidParam = activeCompetitionId ? `&cid=${encodeURIComponent(activeCompetitionId)}` : "";
-    const url = `${window.location.origin}${window.location.pathname}#/display/full?layout=${screenType}&live=1${cidParam}${seedParam}`;
+    const venueParams = `&theme=${encodeURIComponent(displayVenueTheme)}&scale=${encodeURIComponent(displayVenueScale)}&font=${encodeURIComponent(displayVenueFont)}`;
+    const url = `${window.location.origin}${window.location.pathname}#/display/full?layout=${screenType}&live=1${cidParam}${seedParam}${venueParams}`;
     const popup = window.open(url, "_blank", "width=1280,height=720");
 
     if (!popup) return;
@@ -5777,6 +5811,63 @@ const ScreenPage = () => {
           <option value="results_all" className="bg-slate-900">4. Results All</option>
           <option value="ipf_plate" className="bg-slate-900">5. IPF Plate Only</option>
         </select>
+
+        <p className="mt-6 text-xs font-semibold uppercase tracking-widest text-slate-500">Venue screen (projector / LED)</p>
+        <p className="mt-1 text-xs text-slate-400">
+          Applied when the display opens. Use larger text % for far viewing; theme matches the on-screen color preset.
+        </p>
+        <div className="mt-4 grid gap-4 md:grid-cols-3">
+          <div>
+            <label className="mb-2 block text-sm text-slate-300">Color theme</label>
+            <select
+              value={displayVenueTheme}
+              onChange={(e) => setDisplayVenueTheme(e.target.value as DisplayThemeKey)}
+              className="h-11 w-full rounded-xl border border-white/20 bg-black/40 px-3 text-sm"
+            >
+              {DISPLAY_THEME_ORDER.map((key) => (
+                <option key={key} value={key} className="bg-slate-900">
+                  {DISPLAY_THEME_CONFIG[key].label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-2 block text-sm text-slate-300">Text size</label>
+            <select
+              value={displayVenueScale}
+              onChange={(e) => setDisplayVenueScale(e.target.value)}
+              className="h-11 w-full rounded-xl border border-white/20 bg-black/40 px-3 text-sm"
+            >
+              {DISPLAY_SCALE_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value} className="bg-slate-900">
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-2 block text-sm text-slate-300">Font</label>
+            <select
+              value={displayVenueFont}
+              onChange={(e) => setDisplayVenueFont(e.target.value as DisplayFontFamilyKey)}
+              className="h-11 w-full rounded-xl border border-white/20 bg-black/40 px-3 text-sm"
+            >
+              <option value="system" className="bg-slate-900">
+                System UI
+              </option>
+              <option value="condensed" className="bg-slate-900">
+                Condensed (narrow)
+              </option>
+              <option value="mono" className="bg-slate-900">
+                Monospace
+              </option>
+              <option value="serif" className="bg-slate-900">
+                Serif
+              </option>
+            </select>
+          </div>
+        </div>
+
         <div className="mt-4 flex flex-wrap gap-3">
           <button
             onClick={openDisplayScreen}
@@ -5854,23 +5945,32 @@ const formatPerSideLoading = (plates: number[], includeCollars: boolean) => {
 
 const formatAttemptWeight = (attempt: Attempt) => (attempt.weight === "" ? "-" : `${attempt.weight}`);
 
-const AttemptDisplayCell = ({ attempt }: { attempt: Attempt }) => {
+const AttemptDisplayCell = ({ attempt, isDarkTheme }: { attempt: Attempt; isDarkTheme: boolean }) => {
   const isNoLift = attempt.status === "NO";
   const isGood = attempt.status === "GOOD";
   const isPending = attempt.status === "PENDING";
+  const tone = isDarkTheme
+    ? {
+        good: "bg-green-500/20 text-green-100",
+        no: "bg-red-500/20 text-red-100",
+        pending: "bg-amber-500/20 text-amber-100",
+        default: "bg-white/5 text-slate-300",
+      }
+    : {
+        good: "bg-emerald-600/15 text-emerald-900",
+        no: "bg-red-500/20 text-red-900",
+        pending: "bg-amber-500/20 text-amber-950",
+        default: "bg-slate-100 text-slate-700",
+      };
+  const cell =
+    isGood ? tone.good : isNoLift ? tone.no : isPending ? tone.pending : tone.default;
   return (
     <td
-      className={`px-2 py-2 text-center text-base font-semibold md:text-lg ${
-        isGood
-          ? "bg-green-500/20 text-green-100"
-          : isNoLift
-            ? "bg-red-500/20 text-red-100"
-            : isPending
-              ? "bg-amber-500/20 text-amber-100"
-              : "bg-white/5 text-slate-300"
-      }`}
+      className={`align-top whitespace-normal break-words px-2 py-2 text-center text-sm font-semibold tabular-nums ${cell}`}
     >
-      <span className={isNoLift ? "line-through decoration-2" : ""}>{formatAttemptWeight(attempt)}</span>
+      <span className={`inline-block max-w-full ${isNoLift ? "line-through decoration-2" : ""}`}>
+        {formatAttemptWeight(attempt)}
+      </span>
     </td>
   );
 };
@@ -5893,7 +5993,7 @@ const PlateStack = ({ weight, includeCollars }: { weight: number; includeCollars
           boxShadow: "inset 0 0 10px rgba(255,255,255,0.28)",
         }}
       >
-        <span className={`pt-1 text-[10px] font-bold ${textIsDark ? "text-black" : "text-white"}`}>{plate}</span>
+        <span className={`pt-1 text-xs font-bold leading-none ${textIsDark ? "text-black" : "text-white"}`}>{plate}</span>
       </div>
     );
   };
@@ -6231,6 +6331,26 @@ const ResultsTable = memo(({
   competitionMode: CompetitionMode;
 }) => {
   const isBenchOnly = competitionMode === "BENCH_ONLY";
+  /** Fixed layout; Lifter & Team get extra width; names wrap instead of truncating. */
+  const resultColCount = isBenchOnly ? 10 : 16;
+  const LIFTER_COL_INDEX = 1;
+  const TEAM_COL_INDEX = 3;
+  const lifterColWeight = 2.15;
+  const teamColWeight = 1.65;
+  const defaultColWeight = 1;
+  const colWeights = Array.from({ length: resultColCount }, (_, i) => {
+    if (i === LIFTER_COL_INDEX) return lifterColWeight;
+    if (i === TEAM_COL_INDEX) return teamColWeight;
+    return defaultColWeight;
+  });
+  const weightSum = colWeights.reduce((a, b) => a + b, 0);
+  const resultsColgroup = (
+    <colgroup>
+      {colWeights.map((w, i) => (
+        <col key={i} style={{ width: `${(w / weightSum) * 100}%` }} />
+      ))}
+    </colgroup>
+  );
   const isDualCategory = (category: string) => category.includes(" + ");
 
   const getDualCategoryParts = (category: string): [string, string] => {
@@ -6275,96 +6395,155 @@ const ResultsTable = memo(({
     return (
       <tr
         key={`${lifter.id}-${groupName ?? "ungrouped"}`}
-        className={`border-t border-white/8 ${lifter.id === currentLifterId ? "bg-cyan-500/10" : idx % 2 === 0 ? "" : isDarkTheme ? "bg-white/[0.015]" : "bg-black/[0.02]"}`}
+        className={`border-t ${isDarkTheme ? "border-white/8" : "border-black/[0.08]"} ${
+          lifter.id === currentLifterId ? "bg-cyan-500/10" : idx % 2 === 0 ? "" : isDarkTheme ? "bg-white/[0.015]" : "bg-black/[0.03]"
+        }`}
       >
-        <td className="px-3 py-2 text-slate-400">{idx + 1}</td>
-        <td className="px-3 py-2 font-semibold">
-          <span>{lifter.name || "-"}</span>
-          {isDual && (
-            <span className="ml-1.5 rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300">DUAL</span>
-          )}
+        <td className={`align-top whitespace-normal break-words px-2 py-2 tabular-nums ${isDarkTheme ? "text-slate-400" : "text-slate-600"}`}>
+          {idx + 1}
         </td>
-        <td className="px-3 py-2 hidden md:table-cell text-slate-400 text-xs">{displayCategory}</td>
-        <td className="px-3 py-2 hidden md:table-cell text-slate-400">{lifter.team || "-"}</td>
-        <td className="px-3 py-2 hidden md:table-cell tabular-nums text-slate-400">
+        <td className={`align-top whitespace-normal break-words px-2 py-2 font-semibold ${isDarkTheme ? "text-white" : "text-slate-900"}`}>
+          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 break-words">
+            <span>{lifter.name || "-"}</span>
+            {isDual && (
+              <span
+                className={`shrink-0 rounded px-1.5 py-0.5 text-xs font-semibold ${
+                  isDarkTheme ? "bg-amber-500/20 text-amber-300" : "bg-amber-400/30 text-amber-950"
+                }`}
+              >
+                DUAL
+              </span>
+            )}
+          </div>
+        </td>
+        <td
+          className={`align-top whitespace-normal break-words px-2 py-2 hidden md:table-cell ${isDarkTheme ? "text-slate-400" : "text-slate-600"}`}
+        >
+          {displayCategory}
+        </td>
+        <td
+          className={`align-top whitespace-normal break-words px-2 py-2 hidden md:table-cell ${isDarkTheme ? "text-slate-400" : "text-slate-600"}`}
+        >
+          {lifter.team || "-"}
+        </td>
+        <td
+          className={`align-top whitespace-normal break-words px-2 py-2 hidden tabular-nums md:table-cell ${isDarkTheme ? "text-slate-400" : "text-slate-600"}`}
+        >
           {typeof lifter.bodyweight === "number" ? `${lifter.bodyweight} kg` : "-"}
         </td>
         {!isBenchOnly && (
           <>
-            <AttemptDisplayCell attempt={lifter.squatAttempts[0]} />
-            <AttemptDisplayCell attempt={lifter.squatAttempts[1]} />
-            <AttemptDisplayCell attempt={lifter.squatAttempts[2]} />
+            <AttemptDisplayCell attempt={lifter.squatAttempts[0]} isDarkTheme={isDarkTheme} />
+            <AttemptDisplayCell attempt={lifter.squatAttempts[1]} isDarkTheme={isDarkTheme} />
+            <AttemptDisplayCell attempt={lifter.squatAttempts[2]} isDarkTheme={isDarkTheme} />
           </>
         )}
-        <AttemptDisplayCell attempt={lifter.benchAttempts[0]} />
-        <AttemptDisplayCell attempt={lifter.benchAttempts[1]} />
-        <AttemptDisplayCell attempt={lifter.benchAttempts[2]} />
+        <AttemptDisplayCell attempt={lifter.benchAttempts[0]} isDarkTheme={isDarkTheme} />
+        <AttemptDisplayCell attempt={lifter.benchAttempts[1]} isDarkTheme={isDarkTheme} />
+        <AttemptDisplayCell attempt={lifter.benchAttempts[2]} isDarkTheme={isDarkTheme} />
         {!isBenchOnly && (
           <>
-            <AttemptDisplayCell attempt={lifter.deadliftAttempts[0]} />
-            <AttemptDisplayCell attempt={lifter.deadliftAttempts[1]} />
-            <AttemptDisplayCell attempt={lifter.deadliftAttempts[2]} />
+            <AttemptDisplayCell attempt={lifter.deadliftAttempts[0]} isDarkTheme={isDarkTheme} />
+            <AttemptDisplayCell attempt={lifter.deadliftAttempts[1]} isDarkTheme={isDarkTheme} />
+            <AttemptDisplayCell attempt={lifter.deadliftAttempts[2]} isDarkTheme={isDarkTheme} />
           </>
         )}
-        <td className="px-3 py-2 font-semibold">{lifter.total > 0 ? `${lifter.total} kg` : "-"}</td>
-        <td className="px-3 py-2 hidden md:table-cell text-slate-400">{lifter.points || "-"}</td>
+        <td
+          className={`align-top whitespace-normal break-words px-2 py-2 font-semibold tabular-nums ${isDarkTheme ? "text-white" : "text-slate-900"}`}
+        >
+          {lifter.total > 0 ? `${lifter.total} kg` : "-"}
+        </td>
+        <td
+          className={`align-top whitespace-normal break-words px-2 py-2 hidden tabular-nums md:table-cell ${isDarkTheme ? "text-slate-400" : "text-slate-600"}`}
+        >
+          {lifter.points || "-"}
+        </td>
       </tr>
     );
   };
 
   const tableHead = (
-    <thead className={`text-left ${isDarkTheme ? "text-slate-300 bg-white/[0.03]" : "text-slate-600 bg-black/5"}`}>
+    <thead
+      className={`text-left text-sm font-semibold ${isDarkTheme ? "text-slate-300 bg-white/[0.03]" : "text-slate-700 bg-slate-100/90"}`}
+    >
       <tr>
-        <th className="px-3 py-2">#</th>
-        <th className="px-3 py-2">Lifter</th>
-        <th className="px-3 py-2 hidden md:table-cell">Category</th>
-        <th className="px-3 py-2 hidden md:table-cell">Team</th>
-        <th className="px-3 py-2 hidden md:table-cell">Body weight</th>
+        <th className="align-bottom whitespace-normal break-words px-2 py-2">#</th>
+        <th className="align-bottom whitespace-normal break-words px-2 py-2">Lifter</th>
+        <th className="align-bottom whitespace-normal break-words px-2 py-2 hidden md:table-cell">Category</th>
+        <th className="align-bottom whitespace-normal break-words px-2 py-2 hidden md:table-cell">Team</th>
+        <th className="align-bottom whitespace-normal break-words px-2 py-2 hidden md:table-cell">Body weight</th>
         {!isBenchOnly && (
           <>
-            <th className="px-3 py-2">SQ1</th>
-            <th className="px-3 py-2">SQ2</th>
-            <th className="px-3 py-2">SQ3</th>
+            <th className="align-bottom whitespace-normal break-words px-2 py-2 text-center">SQ1</th>
+            <th className="align-bottom whitespace-normal break-words px-2 py-2 text-center">SQ2</th>
+            <th className="align-bottom whitespace-normal break-words px-2 py-2 text-center">SQ3</th>
           </>
         )}
-        <th className="px-3 py-2">BP1</th>
-        <th className="px-3 py-2">BP2</th>
-        <th className="px-3 py-2">BP3</th>
+        <th className="align-bottom whitespace-normal break-words px-2 py-2 text-center">BP1</th>
+        <th className="align-bottom whitespace-normal break-words px-2 py-2 text-center">BP2</th>
+        <th className="align-bottom whitespace-normal break-words px-2 py-2 text-center">BP3</th>
         {!isBenchOnly && (
           <>
-            <th className="px-3 py-2">DL1</th>
-            <th className="px-3 py-2">DL2</th>
-            <th className="px-3 py-2">DL3</th>
+            <th className="align-bottom whitespace-normal break-words px-2 py-2 text-center">DL1</th>
+            <th className="align-bottom whitespace-normal break-words px-2 py-2 text-center">DL2</th>
+            <th className="align-bottom whitespace-normal break-words px-2 py-2 text-center">DL3</th>
           </>
         )}
-        <th className="px-3 py-2 font-semibold">Total</th>
-        <th className="px-3 py-2 hidden md:table-cell">GL</th>
+        <th className="align-bottom whitespace-normal break-words px-2 py-2 font-semibold">Total</th>
+        <th className="align-bottom whitespace-normal break-words px-2 py-2 hidden text-center md:table-cell">GL</th>
       </tr>
     </thead>
   );
 
   return (
-    <div className="h-full space-y-3 overflow-y-auto">
+    <div className={`h-full space-y-3 overflow-y-auto ${DISPLAY_RESULTS_BODY}`}>
       {rankingByGroup.map(({ groupName, members }) => (
-        <div key={groupName || "default"} className="overflow-hidden rounded-xl border border-cyan-400/40 bg-black/30">
-          <div className="flex w-full items-center gap-3 border-b-2 border-cyan-400/50 bg-gradient-to-r from-cyan-900/30 to-cyan-900/10 px-4 py-4">
-            <div className="h-3.5 w-1.5 rounded-full bg-cyan-400" />
+        <div
+          key={groupName || "default"}
+          className={`overflow-hidden rounded-xl border ${
+            isDarkTheme
+              ? "border-cyan-400/40 bg-black/30"
+              : "border-cyan-700/25 bg-white shadow-md ring-1 ring-black/5"
+          }`}
+        >
+          <div
+            className={`flex w-full items-center gap-3 border-b-2 px-4 py-4 ${
+              isDarkTheme
+                ? "border-cyan-400/50 bg-gradient-to-r from-cyan-900/30 to-cyan-900/10"
+                : "border-cyan-700/30 bg-gradient-to-r from-cyan-100/95 to-cyan-50/80"
+            }`}
+          >
+            <div className={`h-3.5 w-1.5 rounded-full ${isDarkTheme ? "bg-cyan-400" : "bg-cyan-600"}`} />
             <div className="flex-1">
-              <p className="text-[clamp(1rem,2.2vw,1.3rem)] font-black uppercase leading-tight tracking-[0.24em] text-cyan-100">
+              <p
+                className={`text-sm font-black uppercase leading-tight tracking-[0.24em] ${
+                  isDarkTheme ? "text-cyan-100" : "text-cyan-950"
+                }`}
+              >
                 {groupName || "Unassigned"}
               </p>
-              <p className="mt-0.5 text-[clamp(0.65rem,1.1vw,0.75rem)] font-semibold normal-case tracking-normal text-cyan-300/70">
+              <p
+                className={`mt-0.5 text-xs font-semibold normal-case tracking-normal ${
+                  isDarkTheme ? "text-cyan-300/70" : "text-cyan-800/85"
+                }`}
+              >
                 {members.length} lifter{members.length !== 1 ? "s" : ""}
               </p>
             </div>
           </div>
           <div className="overflow-x-auto">
-            <table className={`w-full ${isBenchOnly ? "min-w-[620px]" : "min-w-[820px]"} text-xs md:text-sm`}>
+            <table className={`table-fixed w-full ${DISPLAY_RESULTS_BODY}`}>
+              {resultsColgroup}
               {tableHead}
               <tbody>
                 {members.length === 0 && (
                   <tr>
-                    <td colSpan={isBenchOnly ? 10 : 16} className="px-3 py-4 text-center text-slate-500 text-xs">No lifters in this group.</td>
+                    <td
+                      colSpan={isBenchOnly ? 10 : 16}
+                      className={`whitespace-normal break-words px-3 py-4 text-center text-sm ${isDarkTheme ? "text-slate-500" : "text-slate-600"}`}
+                    >
+                      No lifters in this group.
+                    </td>
                   </tr>
                 )}
                 {members.map((lifter, idx) => renderLifterRow(lifter, idx, groupName))}
@@ -6375,22 +6554,41 @@ const ResultsTable = memo(({
       ))}
 
       {ungroupedRanking.length > 0 && (
-        <div className="overflow-hidden rounded-xl border border-slate-500/30 bg-black/20">
+        <div
+          className={`overflow-hidden rounded-xl border ${
+            isDarkTheme ? "border-slate-500/30 bg-black/20" : "border-slate-300 bg-white shadow-md ring-1 ring-black/5"
+          }`}
+        >
           {rankingByGroup.length > 0 && (
-            <div className="flex w-full items-center gap-3 border-b-2 border-slate-500/40 bg-gradient-to-r from-slate-900/25 to-slate-900/10 px-4 py-4">
-              <div className="h-3.5 w-1.5 rounded-full bg-slate-400" />
+            <div
+              className={`flex w-full items-center gap-3 border-b-2 px-4 py-4 ${
+                isDarkTheme
+                  ? "border-slate-500/40 bg-gradient-to-r from-slate-900/25 to-slate-900/10"
+                  : "border-slate-300 bg-gradient-to-r from-slate-100 to-slate-50"
+              }`}
+            >
+              <div className={`h-3.5 w-1.5 rounded-full ${isDarkTheme ? "bg-slate-400" : "bg-slate-600"}`} />
               <div className="flex-1">
-                <p className="text-[clamp(1rem,2.2vw,1.3rem)] font-black uppercase leading-tight tracking-[0.24em] text-slate-200">
+                <p
+                  className={`text-sm font-black uppercase leading-tight tracking-[0.24em] ${
+                    isDarkTheme ? "text-slate-200" : "text-slate-900"
+                  }`}
+                >
                   Ungrouped
                 </p>
-                <p className="mt-0.5 text-[clamp(0.65rem,1.1vw,0.75rem)] font-semibold normal-case tracking-normal text-slate-400/70">
+                <p
+                  className={`mt-0.5 text-xs font-semibold normal-case tracking-normal ${
+                    isDarkTheme ? "text-slate-400/70" : "text-slate-600"
+                  }`}
+                >
                   {ungroupedRanking.length} lifter{ungroupedRanking.length !== 1 ? "s" : ""}
                 </p>
               </div>
             </div>
           )}
           <div className="overflow-x-auto">
-            <table className={`w-full ${isBenchOnly ? "min-w-[620px]" : "min-w-[820px]"} text-xs md:text-sm`}>
+            <table className={`table-fixed w-full ${DISPLAY_RESULTS_BODY}`}>
+              {resultsColgroup}
               {tableHead}
               <tbody>
                 {ungroupedRanking.map((lifter, idx) => renderLifterRow(lifter, idx))}
@@ -6401,8 +6599,12 @@ const ResultsTable = memo(({
       )}
 
       {rankingByGroup.length === 0 && ungroupedRanking.length === 0 && (
-        <div className="flex h-32 items-center justify-center rounded-xl border border-white/10 bg-black/20">
-          <p className="text-sm text-slate-500">No lifters in results yet.</p>
+        <div
+          className={`flex h-32 items-center justify-center rounded-xl border ${
+            isDarkTheme ? "border-white/10 bg-black/20" : "border-slate-200 bg-slate-100"
+          }`}
+        >
+          <p className={`text-sm ${isDarkTheme ? "text-slate-500" : "text-slate-600"}`}>No lifters in results yet.</p>
         </div>
       )}
     </div>
@@ -6423,7 +6625,6 @@ const DisplayFullPage = () => {
     timerPhase,
     timerEndsAt,
     activeCompetitionGroupName,
-    activeCompetitionName,
     competitionMode,
     groups,
     manualOrderByStage,
@@ -6437,32 +6638,38 @@ const DisplayFullPage = () => {
         ? "results_all"
         : rawLayout;
   const forceLive = searchParams.get("live") === "1";
+  const displayTheme = parseDisplayThemeFromSearch(searchParams.get("theme")) ?? "black";
+  const displayFontScale = parseDisplayScaleFromSearch(searchParams.get("scale"));
+  const displayFontKey = parseDisplayFontFromSearch(searchParams.get("font"));
   const [showSignalOverlay, setShowSignalOverlay] = useState(false);
   const [displaySignals, setDisplaySignals] = useState<RefSignal[]>([null, null, null]);
   const [overlayPhase, setOverlayPhase] = useState<"circles" | "lift" | "no-lift" | null>(null);
   const [isFinalVerdictAnimating, setIsFinalVerdictAnimating] = useState(false);
-  const [displayTheme, setDisplayTheme] = useState<DisplayThemeKey>("black");
   const prevSignalsRef = useRef<string>("");
   const overlayHideTimeoutRef = useRef<number | null>(null);
   const overlayPhaseTimeoutRef = useRef<number | null>(null);
 
-  const cycleDisplayTheme = () => {
-    setDisplayTheme((prev) => {
-      const currentIdx = DISPLAY_THEME_ORDER.indexOf(prev);
-      const nextIdx = (currentIdx + 1) % DISPLAY_THEME_ORDER.length;
-      return DISPLAY_THEME_ORDER[nextIdx];
-    });
-  };
   const activeTheme = DISPLAY_THEME_CONFIG[displayTheme];
   const isDarkTheme = activeTheme.tone === "dark";
   const displayRootClass = `relative min-h-screen px-3 py-4 md:px-6 ${activeTheme.rootClass}`;
-  const displayRootStyle: CSSProperties = {
-    textRendering: "optimizeLegibility",
-    WebkitFontSmoothing: "antialiased",
-    MozOsxFontSmoothing: "grayscale",
-    fontVariantNumeric: "tabular-nums",
-  };
-  const themeButtonClass = activeTheme.buttonClass;
+  const displayRootStyle: CSSProperties = useMemo(
+    () => ({
+      textRendering: "optimizeLegibility",
+      WebkitFontSmoothing: "antialiased",
+      MozOsxFontSmoothing: "grayscale",
+      fontVariantNumeric: "tabular-nums",
+      fontFamily: DISPLAY_FONT_FAMILY_CONFIG[displayFontKey],
+    }),
+    [displayFontKey],
+  );
+
+  useEffect(() => {
+    const prev = document.documentElement.style.fontSize;
+    document.documentElement.style.fontSize = `${16 * displayFontScale}px`;
+    return () => {
+      document.documentElement.style.fontSize = prev;
+    };
+  }, [displayFontScale]);
   const sortedLifters = useMemo(
     () =>
       [...lifters].sort((a, b) => {
@@ -6614,15 +6821,18 @@ const DisplayFullPage = () => {
     return [category.slice(0, idx).trim(), category.slice(idx + 3).trim()];
   };
 
+  /** Strip trailing kg so we never render "59 KG KG" when weightClass already includes units. */
+  const normalizeWeightClassForBoard = (wc: string) => wc.replace(/\s*(kg|KG)\s*$/i, "").trim();
+
   const getScoreboardClasses = (lifter: RankedLifter): string[] => {
     const category = (lifter.category || "").trim();
-    const weightClass = (lifter.weightClass || "").trim();
+    const wcBase = normalizeWeightClassForBoard((lifter.weightClass || "").trim());
     if (!category) {
-      return weightClass ? [`Unclassified ${weightClass} KG`] : ["Unclassified"];
+      return wcBase ? [`Unclassified ${wcBase} KG`] : ["Unclassified"];
     }
 
     const categories = isDualCategory(category) ? getDualCategoryParts(category) : [category];
-    return categories.map((part) => (weightClass ? `${part} ${weightClass} KG` : part));
+    return categories.map((part) => (wcBase ? `${part} ${wcBase} KG` : part));
   };
 
   const allGroupNames = useMemo(() => {
@@ -6719,7 +6929,11 @@ const DisplayFullPage = () => {
         isDarkTheme ? "border-white/15 bg-black/35" : "border-slate-200 bg-slate-50"
       }`}
     >
-      <p className="whitespace-nowrap pl-[max(0.5rem,calc(50%-6rem))] pr-[max(0.5rem,calc(50%-6rem))] text-[clamp(0.58rem,1.35vw,0.72rem)] font-black uppercase leading-relaxed tracking-wide text-cyan-100">
+      <p
+        className={`whitespace-nowrap pl-[max(0.5rem,calc(50%-6rem))] pr-[max(0.5rem,calc(50%-6rem))] text-sm font-black uppercase leading-relaxed tracking-wide ${
+          isDarkTheme ? "text-cyan-100" : "text-cyan-950"
+        }`}
+      >
         {flightLineOrdered.map((lifter, idx) => {
           const w = getAttemptValue(lifter, currentLift, currentAttemptIndex);
           const { first, last } = splitLifterNameParts(lifter.name || "");
@@ -6732,16 +6946,18 @@ const DisplayFullPage = () => {
               : "border-2 border-cyan-500 bg-amber-50 shadow-md ring-2 ring-cyan-400/60");
           return (
             <span key={`results-order-inline-${lifter.id}`} className="inline-block scroll-m-1">
-              {idx > 0 ? <span className="mx-1.5 text-slate-500 sm:mx-2.5">|</span> : null}
+              {idx > 0 ? (
+                <span className={`mx-1.5 sm:mx-2.5 ${isDarkTheme ? "text-slate-500" : "text-slate-400"}`}>|</span>
+              ) : null}
               <span
                 data-display-order-lifter={lifter.id}
                 className={`inline-block rounded-md px-2 py-0.5 align-baseline transition-colors ${segmentHighlight || ""}`}
               >
-                <span className="tabular-nums text-cyan-300">#{idx + 1}</span>{" "}
-                <span className={isCurrent && !isDarkTheme ? "text-slate-900" : ""}>{namePart.toUpperCase()}</span>{" "}
+                <span className={`tabular-nums ${isDarkTheme ? "text-cyan-300" : "text-cyan-800"}`}>#{idx + 1}</span>{" "}
+                <span className={!isDarkTheme ? "text-slate-900" : undefined}>{namePart.toUpperCase()}</span>{" "}
                 <span className={isDarkTheme ? "text-slate-500" : isCurrent ? "text-slate-500" : "text-slate-400"}>*</span>{" "}
                 <span
-                  className={`tabular-nums ${isDarkTheme ? "text-amber-200" : isCurrent ? "text-amber-700" : "text-amber-600"}`}
+                  className={`tabular-nums ${isDarkTheme ? "text-amber-200" : isCurrent ? "text-amber-700" : "text-amber-700"}`}
                 >
                   {w === null ? "—" : `${w.toFixed(1)} KG`}
                 </span>
@@ -6779,29 +6995,29 @@ const DisplayFullPage = () => {
             <p className="mt-2 text-[clamp(2.6rem,8vw,5.5rem)] font-bold leading-tight">{loadingWeight.toFixed(1)} kg</p>
           </div>
 
-          <div className="mt-2 grid grid-cols-2 gap-3 divide-x divide-cyan-400/25 md:gap-6">
-            <div className="min-w-0 pr-2 md:pr-4">
-              <p className="text-center text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Current</p>
-              <p className="mt-0.5 truncate text-center text-[clamp(0.85rem,2vw,1.15rem)] font-black uppercase text-white">
+          <div className="mt-2 flex flex-col divide-y divide-cyan-400/25">
+            <div className="min-w-0 pb-10">
+              <p className="text-center text-sm font-semibold uppercase tracking-[0.2em] text-cyan-300">Current</p>
+              <p className="mt-0.5 whitespace-normal break-words text-center text-sm font-black uppercase text-white">
                 {currentLifter?.name || "—"}
               </p>
-              <div className="mt-2">
+              <div className="mt-4 flex justify-center">
                 <PlateStack weight={loadingWeight} includeCollars={includeCollars} />
               </div>
             </div>
-            <div className="min-w-0 pl-2 md:pl-4">
-              <p className="text-center text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Next</p>
+            <div className="min-w-0 pt-10">
+              <p className="text-center text-sm font-semibold uppercase tracking-[0.2em] text-cyan-300">Next</p>
               {nextLifter && nextLoadingWeight !== null ? (
                 <>
-                  <p className="mt-0.5 truncate text-center text-[clamp(0.85rem,2vw,1.15rem)] font-black uppercase text-cyan-100">
+                  <p className="mt-0.5 whitespace-normal break-words text-center text-sm font-black uppercase text-cyan-100">
                     {nextLifter.name || "—"}
                   </p>
-                  <div className="mt-2">
+                  <div className="mt-4 flex justify-center">
                     <PlateStack weight={nextLoadingWeight} includeCollars={includeCollars} />
                   </div>
                 </>
               ) : (
-                <div className="mt-2 flex min-h-[200px] flex-col items-center justify-center rounded-2xl border border-white/10 bg-black/25 px-3 py-6 text-center md:min-h-[240px]">
+                <div className="mt-4 flex min-h-[200px] flex-col items-center justify-center rounded-2xl border border-white/10 bg-black/25 px-3 py-6 text-center md:min-h-[240px]">
                   <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">No next lifter</p>
                 </div>
               )}
@@ -6810,13 +7026,6 @@ const DisplayFullPage = () => {
         </div>
 
         {platformTimerChip}
-
-        <button
-          onClick={cycleDisplayTheme}
-          className={themeButtonClass}
-        >
-          Theme: {activeTheme.label}
-        </button>
       </div>
     );
   }
@@ -6826,26 +7035,56 @@ const DisplayFullPage = () => {
     const hasPlate = displayMode === "signal_results_plate";
 
     const plateSplitDiagram = (
-      <div className="grid grid-cols-2 gap-2 divide-x divide-white/15 md:gap-4">
+      <div
+        className={`grid grid-cols-2 gap-2 divide-x md:gap-4 ${isDarkTheme ? "divide-white/15" : "divide-black/10"}`}
+      >
         <div className="min-w-0 pr-2 md:pr-4">
-          <p className="text-center text-[9px] font-semibold uppercase tracking-[0.18em] text-cyan-300 md:text-[10px]">Current</p>
-          <p className="truncate text-center text-[10px] font-bold text-white md:text-xs">{currentLifter?.name || "—"}</p>
+          <p
+            className={`text-center text-sm font-semibold uppercase tracking-[0.18em] ${
+              isDarkTheme ? "text-cyan-300" : "text-cyan-800"
+            }`}
+          >
+            Current
+          </p>
+          <p
+            className={`truncate text-center text-sm font-bold ${isDarkTheme ? "text-white" : "text-slate-900"}`}
+          >
+            {currentLifter?.name || "—"}
+          </p>
           <div className="mt-1 min-w-0">
             <PlateStack weight={loadingWeight} includeCollars={includeCollars} />
           </div>
         </div>
         <div className="min-w-0 pl-2 md:pl-4">
-          <p className="text-center text-[9px] font-semibold uppercase tracking-[0.18em] text-cyan-300 md:text-[10px]">Next</p>
+          <p
+            className={`text-center text-sm font-semibold uppercase tracking-[0.18em] ${
+              isDarkTheme ? "text-cyan-300" : "text-cyan-800"
+            }`}
+          >
+            Next
+          </p>
           {nextLifter && nextLoadingWeight !== null ? (
             <>
-              <p className="truncate text-center text-[10px] font-bold text-cyan-100 md:text-xs">{nextLifter.name || "—"}</p>
+              <p
+                className={`truncate text-center text-sm font-bold ${
+                  isDarkTheme ? "text-cyan-100" : "text-cyan-900"
+                }`}
+              >
+                {nextLifter.name || "—"}
+              </p>
               <div className="mt-1 min-w-0">
                 <PlateStack weight={nextLoadingWeight} includeCollars={includeCollars} />
               </div>
             </>
           ) : (
-            <div className="mt-1 flex min-h-[160px] flex-col items-center justify-center rounded-xl border border-white/10 bg-black/30 px-2 py-6 text-center md:min-h-[200px]">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 md:text-xs">No next lifter</p>
+            <div
+              className={`mt-1 flex min-h-[160px] flex-col items-center justify-center rounded-xl border px-2 py-6 text-center md:min-h-[200px] ${
+                isDarkTheme ? "border-white/10 bg-black/30" : "border-slate-200 bg-slate-100"
+              }`}
+            >
+              <p className={`text-sm font-semibold uppercase tracking-wide ${isDarkTheme ? "text-slate-500" : "text-slate-600"}`}>
+                No next lifter
+              </p>
             </div>
           )}
         </div>
@@ -6858,22 +7097,28 @@ const DisplayFullPage = () => {
         style={displayRootStyle}
       >
         {/* ── Top header strip ── */}
-        <div className="flex-none border-b border-white/10 px-3 py-2 md:px-5 md:py-3">
+        <div className={`flex-none border-b px-3 py-2 md:px-5 md:py-3 ${isDarkTheme ? "border-white/10" : "border-black/10"}`}>
           <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
-            <p className="text-[clamp(0.95rem,2.2vw,1.6rem)] font-black uppercase leading-tight tracking-tight">
+            <p className="text-sm font-black uppercase leading-tight tracking-tight">
               {currentLifter?.name || "NO LIFTER"}
             </p>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 text-right">
-              <p className="text-[clamp(0.75rem,1.6vw,1.1rem)] font-semibold uppercase text-cyan-300">
+              <p
+                className={`text-sm font-semibold uppercase ${
+                  isDarkTheme ? "text-cyan-300" : "text-cyan-800"
+                }`}
+              >
                 {currentLift.toUpperCase()} · ATT {currentAttemptIndex + 1}
               </p>
-              <p className="text-[clamp(0.9rem,2vw,1.4rem)] font-bold">
-                {loadingWeight.toFixed(1)} kg
-              </p>
+              <p className="text-sm font-bold tabular-nums">{loadingWeight.toFixed(1)} kg</p>
             </div>
           </div>
           {!competitionStarted && !forceLive && (
-            <p className="mt-1 text-[10px] font-semibold uppercase tracking-widest text-amber-400">
+            <p
+              className={`mt-1 text-sm font-semibold uppercase tracking-widest ${
+                isDarkTheme ? "text-amber-400" : "text-amber-800"
+              }`}
+            >
               Preview mode — competition not started
             </p>
           )}
@@ -6881,36 +7126,59 @@ const DisplayFullPage = () => {
 
         {/* Flight order above plate area (non-plate layouts); plate layout: order strip then one Current | Next split — not duplicated rows. */}
         {!hasPlate && resultsInlineLiftingOrderRow ? (
-          <div className="flex-none border-b border-white/10 px-3 py-2 md:px-5 md:py-2.5">{resultsInlineLiftingOrderRow}</div>
+          <div className={`flex-none border-b px-3 py-2 md:px-5 md:py-2.5 ${isDarkTheme ? "border-white/10" : "border-black/10"}`}>
+            {resultsInlineLiftingOrderRow}
+          </div>
         ) : null}
 
         {hasPlate &&
           (resultsInlineLiftingOrderRow ? (
             <>
-              <div className="flex-none border-b border-white/10 px-3 py-2 md:px-5 md:py-2.5">{resultsInlineLiftingOrderRow}</div>
-              <div className="flex-none border-b border-white/10 px-3 py-2 md:px-5 md:py-3">{plateSplitDiagram}</div>
+              <div className={`flex-none border-b px-3 py-2 md:px-5 md:py-2.5 ${isDarkTheme ? "border-white/10" : "border-black/10"}`}>
+                {resultsInlineLiftingOrderRow}
+              </div>
+              <div className={`flex-none border-b px-3 py-2 md:px-5 md:py-3 ${isDarkTheme ? "border-white/10" : "border-black/10"}`}>
+                {plateSplitDiagram}
+              </div>
             </>
           ) : (
-            <div className="flex-none border-b border-white/10 px-3 py-2 md:px-5 md:py-3">{plateSplitDiagram}</div>
+            <div className={`flex-none border-b px-3 py-2 md:px-5 md:py-3 ${isDarkTheme ? "border-white/10" : "border-black/10"}`}>
+              {plateSplitDiagram}
+            </div>
           ))}
 
         {/* ── Bottom: results / order table — scrolls internally ── */}
         <div className="min-h-0 flex-1 overflow-auto px-3 py-2 md:px-5 md:py-3">
           {displayMode === "order_attempts" ? (
             <div className="flex h-full flex-col gap-3">
-              <div className="rounded-xl border border-white/20 bg-black/30 p-3 text-center">
-                <p className="text-[clamp(0.8rem,1.8vw,1.3rem)] font-semibold uppercase tracking-[0.2em] text-cyan-200">
+              <div
+                className={`rounded-xl border p-3 text-center ${
+                  isDarkTheme ? "border-white/20 bg-black/30" : "border-slate-200 bg-white shadow-sm ring-1 ring-black/5"
+                }`}
+              >
+                <p
+                  className={`text-sm font-semibold uppercase tracking-[0.2em] ${
+                    isDarkTheme ? "text-cyan-200" : "text-cyan-900"
+                  }`}
+                >
                   {currentLift.toUpperCase()} ATTEMPT {currentAttemptIndex + 1}
                   {activeCompetitionGroupName && (
-                    <span className="ml-3 text-[clamp(0.7rem,1.4vw,1rem)] font-normal normal-case tracking-normal text-slate-300">
+                    <span
+                      className={`ml-3 text-sm font-normal normal-case tracking-normal ${
+                        isDarkTheme ? "text-slate-300" : "text-slate-600"
+                      }`}
+                    >
                       — {activeCompetitionGroupName}
                     </span>
                   )}
                 </p>
               </div>
               <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
-                <p className="shrink-0 text-[10px] uppercase tracking-widest text-cyan-300">
-                  Lifting order <span className="font-normal normal-case tracking-normal text-slate-500">— scroll sideways</span>
+                <p className={`shrink-0 text-sm uppercase tracking-widest ${isDarkTheme ? "text-cyan-300" : "text-cyan-800"}`}>
+                  Lifting order{" "}
+                  <span className={`font-normal normal-case tracking-normal ${isDarkTheme ? "text-slate-500" : "text-slate-500"}`}>
+                    — scroll sideways
+                  </span>
                 </p>
                 <div className="min-h-0 overflow-x-auto overflow-y-hidden pb-1 [-webkit-overflow-scrolling:touch]">
                   <div className="flex w-max snap-x snap-mandatory gap-2 pl-[max(0.5rem,calc(50%-6rem))] pr-[max(0.5rem,calc(50%-6rem))]">
@@ -6923,24 +7191,38 @@ const DisplayFullPage = () => {
                           key={lifter.id}
                           data-display-order-lifter={lifter.id}
                           className={`snap-start shrink-0 rounded-xl border p-3 shadow-sm ${
-                            isCurrent ? "border-cyan-300/90 bg-cyan-500/15 ring-1 ring-cyan-400/40" : "border-white/20 bg-black/30"
+                            isCurrent
+                              ? isDarkTheme
+                                ? "border-cyan-300/90 bg-cyan-500/15 ring-1 ring-cyan-400/40"
+                                : "border-cyan-600 bg-cyan-50 ring-1 ring-cyan-400/50"
+                              : isDarkTheme
+                                ? "border-white/20 bg-black/30"
+                                : "border-slate-200 bg-white ring-1 ring-black/5"
                           } w-[min(46vw,12.5rem)] sm:w-[11.5rem]`}
                         >
-                          <p className="text-[clamp(0.72rem,2.1vw,0.95rem)] font-black uppercase leading-snug tracking-tight text-white">
-                            <span className="tabular-nums text-cyan-200">#{idx + 1}</span>{" "}
+                          <p
+                            className={`text-sm font-black uppercase leading-snug tracking-tight ${
+                              isDarkTheme ? "text-white" : "text-slate-900"
+                            }`}
+                          >
+                            <span className={`tabular-nums ${isDarkTheme ? "text-cyan-200" : "text-cyan-800"}`}>#{idx + 1}</span>{" "}
                             <span>{first.toUpperCase()}</span>
                             {last ? <> <span>{last.toUpperCase()}</span></> : null}{" "}
-                            <span className="font-bold text-slate-500">*</span>{" "}
-                            <span className="tabular-nums text-amber-200">
+                            <span className={`font-bold ${isDarkTheme ? "text-slate-500" : "text-slate-400"}`}>*</span>{" "}
+                            <span className={`tabular-nums ${isDarkTheme ? "text-amber-200" : "text-amber-800"}`}>
                               {attemptWeight === null ? "—" : `${attemptWeight.toFixed(1)} KG`}
                             </span>
                           </p>
                           {lifter.group && !activeCompetitionGroupName && (
-                            <p className="mt-1 truncate text-[9px] font-semibold uppercase tracking-widest text-amber-300/85">
+                            <p
+                              className={`mt-1 truncate text-xs font-semibold uppercase tracking-widest ${
+                                isDarkTheme ? "text-amber-300/85" : "text-amber-900/90"
+                              }`}
+                            >
                               {Array.isArray(lifter.group) ? lifter.group.join(" + ") : lifter.group}
                             </p>
                           )}
-                          <p className="mt-1 text-[11px] tabular-nums text-slate-400">
+                          <p className={`mt-1 text-sm tabular-nums ${isDarkTheme ? "text-slate-400" : "text-slate-600"}`}>
                             BW {typeof lifter.bodyweight === "number" ? lifter.bodyweight : "-"} · Lot{" "}
                             {typeof lifter.lot === "number" ? lifter.lot : "-"}
                           </p>
@@ -6950,7 +7232,7 @@ const DisplayFullPage = () => {
                   </div>
                 </div>
                 {flightLineOrdered.length === 0 && (
-                  <p className="text-sm text-slate-400">No lifters added yet.</p>
+                  <p className={`text-sm ${isDarkTheme ? "text-slate-400" : "text-slate-600"}`}>No lifters added yet.</p>
                 )}
               </div>
             </div>
@@ -6960,42 +7242,19 @@ const DisplayFullPage = () => {
                 isDarkTheme ? "border-white/15 bg-black/25 text-slate-300" : "border-slate-200 bg-white/80 text-slate-600"
               }`}
             >
-              <p className="text-[clamp(0.8rem,1.6vw,1rem)]">
+              <p className="text-sm">
                 No groups configured. Add groups in the admin Groups tab to show results tables.
               </p>
             </div>
           ) : (
-            <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
-              <div className="flex shrink-0 justify-end">
-                <button
-                  type="button"
-                  onClick={() =>
-                    downloadScoreboardPdf({
-                      competitionName: activeCompetitionName,
-                      competitionMode,
-                      activeGroupFilter: activeCompetitionGroupName,
-                      rankingByGroup,
-                      ungroupedRanking,
-                    })
-                  }
-                  className={`rounded-lg border px-3 py-1.5 text-xs font-semibold uppercase tracking-wide ${
-                    isDarkTheme
-                      ? "border-cyan-400/50 bg-cyan-500/15 text-cyan-200 hover:bg-cyan-500/25"
-                      : "border-slate-300 bg-white text-slate-800 hover:bg-slate-50"
-                  }`}
-                >
-                  Download PDF
-                </button>
-              </div>
-              <div className="min-h-0 flex-1 overflow-hidden">
-                <ResultsTable
-                  rankingByGroup={rankingByGroup}
-                  ungroupedRanking={ungroupedRanking}
-                  currentLifterId={currentLifterId}
-                  isDarkTheme={isDarkTheme}
-                  competitionMode={competitionMode}
-                />
-              </div>
+            <div className="min-h-0 flex-1 overflow-hidden">
+              <ResultsTable
+                rankingByGroup={rankingByGroup}
+                ungroupedRanking={ungroupedRanking}
+                currentLifterId={currentLifterId}
+                isDarkTheme={isDarkTheme}
+                competitionMode={competitionMode}
+              />
             </div>
           )}
         </div>
@@ -7156,22 +7415,12 @@ const DisplayFullPage = () => {
         )}
 
         {platformTimerChip}
-
-        <button
-          onClick={cycleDisplayTheme}
-          className={themeButtonClass.replace("top-4", "bottom-4")}
-        >
-          Theme: {activeTheme.label}
-        </button>
       </div>
     );
   }
 
   return (
-    <div
-      className={`relative min-h-screen px-4 py-5 ${activeTheme.rootClass}`}
-      style={{ ...displayRootStyle, fontFamily: "Times New Roman, serif" }}
-    >
+    <div className={`relative min-h-screen px-4 py-5 ${activeTheme.rootClass}`} style={displayRootStyle}>
       {!competitionStarted && !forceLive && (
         <div
           className={`mb-3 inline-block rounded border px-3 py-1 text-xs font-semibold ${
@@ -7206,24 +7455,24 @@ const DisplayFullPage = () => {
           </div>
           <div className="grid min-h-0 min-w-0 grid-cols-2 gap-2 divide-x divide-black/15">
             <div className="min-w-0 pr-2">
-              <p className="text-center text-[9px] font-semibold uppercase text-slate-600">Current</p>
-              <p className="truncate text-center text-[10px] font-bold">{currentLifter?.name || "—"}</p>
+              <p className="text-center text-sm font-semibold uppercase text-slate-600">Current</p>
+              <p className="truncate text-center text-sm font-bold">{currentLifter?.name || "—"}</p>
               <div className="mt-1">
                 <PlateStack weight={loadingWeight} includeCollars={includeCollars} />
               </div>
             </div>
             <div className="min-w-0 pl-2">
-              <p className="text-center text-[9px] font-semibold uppercase text-slate-600">Next</p>
+              <p className="text-center text-sm font-semibold uppercase text-slate-600">Next</p>
               {nextLifter && nextLoadingWeight !== null ? (
                 <>
-                  <p className="truncate text-center text-[10px] font-bold text-slate-800">{nextLifter.name || "—"}</p>
+                  <p className="truncate text-center text-sm font-bold text-slate-800">{nextLifter.name || "—"}</p>
                   <div className="mt-1">
                     <PlateStack weight={nextLoadingWeight} includeCollars={includeCollars} />
                   </div>
                 </>
               ) : (
                 <div className="mt-1 flex min-h-[140px] flex-col items-center justify-center rounded-xl border border-black/10 bg-black/5 px-2 py-4 text-center">
-                  <p className="text-xs text-slate-500">No next lifter</p>
+                  <p className="text-sm text-slate-500">No next lifter</p>
                 </div>
               )}
             </div>
@@ -7267,10 +7516,6 @@ const DisplayFullPage = () => {
       </Link>
 
       {platformTimerChip}
-
-      <button onClick={cycleDisplayTheme} className={themeButtonClass}>
-        Theme: {activeTheme.label}
-      </button>
     </div>
   );
 };

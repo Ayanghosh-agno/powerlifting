@@ -7,6 +7,9 @@ export type RefSignal = "GOOD" | "NO" | null;
 export type RefereeSlot = "left" | "center" | "right";
 export type DisplayThemeKey = "black" | "white" | "royal" | "emerald" | "sepia" | "crimson" | "graphite";
 
+/** Venue display typography preset (passed via ?font= on display URLs). */
+export type DisplayFontFamilyKey = "system" | "condensed" | "mono" | "serif";
+
 export type Group = { id: string; name: string; currentLift: LiftType };
 
 export type NextAttemptEntry = { lifterId: string; lift: LiftType; attemptIndex: number };
