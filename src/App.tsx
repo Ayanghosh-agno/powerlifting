@@ -687,6 +687,29 @@ const orderLiftersForDisplayRound = (
   });
 };
 
+/** Full flight for this lift/attempt (includes GOOD/NO). Same manual ordering as display round, but pool is always full IPF order — used so scoreboard flight lines do not drop finished lifters; highlight moves only. */
+const orderLiftersForFlightLineStrip = (
+  lifters: Lifter[],
+  lift: LiftType,
+  attemptIndex: number,
+  manualOrderByStage: Record<string, string[]>,
+): Lifter[] => {
+  const ipfOrdered = orderLiftersByIPF(lifters, lift, attemptIndex);
+  const stageKey = `${lift}-${attemptIndex}`;
+  const manual = manualOrderByStage[stageKey];
+  if (!manual || manual.length === 0) return ipfOrdered;
+
+  const rank = new Map(manual.map((id, idx) => [id, idx]));
+  return [...ipfOrdered].sort((a, b) => {
+    const idxA = rank.get(a.id);
+    const idxB = rank.get(b.id);
+    if (typeof idxA === "number" && typeof idxB === "number") return idxA - idxB;
+    if (typeof idxA === "number") return -1;
+    if (typeof idxB === "number") return 1;
+    return 0;
+  });
+};
+
 const getStageSequence = (competitionMode: CompetitionMode): { lift: LiftType; attemptIndex: number }[] =>
   competitionMode === "BENCH_ONLY"
     ? [
@@ -6623,22 +6646,48 @@ const DisplayFullPage = () => {
 
   const displaySessionLifters = competitionScopedLifters;
 
-  const orderedByCurrentRound = useMemo(
+  /** Active lifters only (not yet GOOD/NO on this attempt) — used for “Next” on plates. */
+  const activeStageOrdered = useMemo(
     () => orderLiftersForDisplayRound(displaySessionLifters, currentLift, currentAttemptIndex, manualOrderByStage),
     [displaySessionLifters, currentLift, currentAttemptIndex, manualOrderByStage],
   );
-  const currentOrderIndex = currentLifter ? orderedByCurrentRound.findIndex((lifter) => lifter.id === currentLifter.id) : -1;
-  const nextLifter =
-    currentOrderIndex >= 0
-      ? orderedByCurrentRound[currentOrderIndex + 1] ?? null
-      : orderedByCurrentRound[1] ?? null;
+
+  /** Full flight including finished attempts — flight line never drops lifters; only highlight moves. */
+  const flightLineOrdered = useMemo(
+    () => orderLiftersForFlightLineStrip(displaySessionLifters, currentLift, currentAttemptIndex, manualOrderByStage),
+    [displaySessionLifters, currentLift, currentAttemptIndex, manualOrderByStage],
+  );
+
+  /** Resolved lifter shown as “current” on this display (same as header / plates — includes fallback when context id is unset). */
+  const flightOrderHighlightId = currentLifter?.id ?? currentLifterId ?? null;
+
+  const activeStageIds = useMemo(() => new Set(activeStageOrdered.map((l) => l.id)), [activeStageOrdered]);
+
+  /** Next **active** lifter after current in full flight order (skips completed names in between). */
+  const nextLifter = useMemo(() => {
+    if (flightLineOrdered.length === 0) return null;
+    const curId = flightOrderHighlightId;
+    if (!curId) {
+      return flightLineOrdered.find((l) => activeStageIds.has(l.id)) ?? null;
+    }
+    const pos = flightLineOrdered.findIndex((l) => l.id === curId);
+    const start = pos >= 0 ? pos + 1 : 0;
+    for (let i = start; i < flightLineOrdered.length; i++) {
+      if (activeStageIds.has(flightLineOrdered[i].id)) return flightLineOrdered[i];
+    }
+    return null;
+  }, [flightLineOrdered, activeStageIds, flightOrderHighlightId]);
+
   const nextLoadingWeight =
     nextLifter ? resolveAttemptWeight(nextLifter, currentLift, currentAttemptIndex) : null;
 
   /** Scroll horizontal lifting-order strips so the active lifter stays visually centered (manual scrollLeft — scrollIntoView is flaky in flex + overflow). */
   useLayoutEffect(() => {
-    if (!currentLifterId || orderedByCurrentRound.length <= 1) return;
-    const idAttr = typeof CSS !== "undefined" && typeof CSS.escape === "function" ? CSS.escape(currentLifterId) : currentLifterId;
+    if (!flightOrderHighlightId || flightLineOrdered.length <= 1) return;
+    const idAttr =
+      typeof CSS !== "undefined" && typeof CSS.escape === "function"
+        ? CSS.escape(flightOrderHighlightId)
+        : flightOrderHighlightId;
     let alive = true;
     const run = () => {
       if (!alive) return;
@@ -6658,7 +6707,49 @@ const DisplayFullPage = () => {
       alive = false;
       cancelAnimationFrame(raf1);
     };
-  }, [currentLifterId, orderedByCurrentRound, displayMode, currentLift, currentAttemptIndex]);
+  }, [flightOrderHighlightId, flightLineOrdered, displayMode, currentLift, currentAttemptIndex]);
+
+  /** Pipe-separated flight order — shown between two plate diagrams on Signal+Results+Plate; not on Order Attempts layout. */
+  const showResultsInlineLiftingOrder = displayMode !== "order_attempts" && flightLineOrdered.length > 0;
+  const resultsInlineLiftingOrderRow = showResultsInlineLiftingOrder ? (
+    <div
+      className={`shrink-0 overflow-x-auto rounded-xl border px-3 py-2 ${
+        isDarkTheme ? "border-white/15 bg-black/35" : "border-slate-200 bg-slate-50"
+      }`}
+    >
+      <p className="whitespace-nowrap pl-[max(0.5rem,calc(50%-6rem))] pr-[max(0.5rem,calc(50%-6rem))] text-[clamp(0.58rem,1.35vw,0.72rem)] font-black uppercase leading-relaxed tracking-wide text-cyan-100">
+        {flightLineOrdered.map((lifter, idx) => {
+          const w = getAttemptValue(lifter, currentLift, currentAttemptIndex);
+          const { first, last } = splitLifterNameParts(lifter.name || "");
+          const namePart = last ? `${first} ${last}` : first;
+          const isCurrent = flightOrderHighlightId !== null && lifter.id === flightOrderHighlightId;
+          const segmentHighlight =
+            isCurrent &&
+            (isDarkTheme
+              ? "border-2 border-cyan-300 bg-cyan-500/35 shadow-[0_0_20px_rgba(34,211,238,0.35)] ring-2 ring-cyan-300/70"
+              : "border-2 border-cyan-500 bg-amber-50 shadow-md ring-2 ring-cyan-400/60");
+          return (
+            <span key={`results-order-inline-${lifter.id}`} className="inline-block scroll-m-1">
+              {idx > 0 ? <span className="mx-1.5 text-slate-500 sm:mx-2.5">|</span> : null}
+              <span
+                data-display-order-lifter={lifter.id}
+                className={`inline-block rounded-md px-2 py-0.5 align-baseline transition-colors ${segmentHighlight || ""}`}
+              >
+                <span className="tabular-nums text-cyan-300">#{idx + 1}</span>{" "}
+                <span className={isCurrent && !isDarkTheme ? "text-slate-900" : ""}>{namePart.toUpperCase()}</span>{" "}
+                <span className={isDarkTheme ? "text-slate-500" : isCurrent ? "text-slate-500" : "text-slate-400"}>*</span>{" "}
+                <span
+                  className={`tabular-nums ${isDarkTheme ? "text-amber-200" : isCurrent ? "text-amber-700" : "text-amber-600"}`}
+                >
+                  {w === null ? "—" : `${w.toFixed(1)} KG`}
+                </span>
+              </span>
+            </span>
+          );
+        })}
+      </p>
+    </div>
+  ) : null;
 
   if (displayMode === "ipf_plate") {
     return (
@@ -6731,6 +6822,34 @@ const DisplayFullPage = () => {
   // Viewport-fitted display screen — no page scroll, all content fits inside h-screen.
   if (["signal_results_plate", "signal_results", "order_attempts", "results_all"].includes(displayMode)) {
     const hasPlate = displayMode === "signal_results_plate";
+
+    const plateSplitDiagram = (
+      <div className="grid grid-cols-2 gap-2 divide-x divide-white/15 md:gap-4">
+        <div className="min-w-0 pr-2 md:pr-4">
+          <p className="text-center text-[9px] font-semibold uppercase tracking-[0.18em] text-cyan-300 md:text-[10px]">Current</p>
+          <p className="truncate text-center text-[10px] font-bold text-white md:text-xs">{currentLifter?.name || "—"}</p>
+          <div className="mt-1 min-w-0">
+            <PlateStack weight={loadingWeight} includeCollars={includeCollars} />
+          </div>
+        </div>
+        <div className="min-w-0 pl-2 md:pl-4">
+          <p className="text-center text-[9px] font-semibold uppercase tracking-[0.18em] text-cyan-300 md:text-[10px]">Next</p>
+          {nextLifter && nextLoadingWeight !== null ? (
+            <>
+              <p className="truncate text-center text-[10px] font-bold text-cyan-100 md:text-xs">{nextLifter.name || "—"}</p>
+              <div className="mt-1 min-w-0">
+                <PlateStack weight={nextLoadingWeight} includeCollars={includeCollars} />
+              </div>
+            </>
+          ) : (
+            <div className="mt-1 flex min-h-[160px] flex-col items-center justify-center rounded-xl border border-white/10 bg-black/30 px-2 py-6 text-center md:min-h-[200px]">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 md:text-xs">No next lifter</p>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+
     return (
       <div
         className={`relative flex h-screen flex-col overflow-hidden ${activeTheme.rootClass}`}
@@ -6758,37 +6877,20 @@ const DisplayFullPage = () => {
           )}
         </div>
 
-        {/* ── Middle: plate section — current (left) / next (right) ── */}
-        {hasPlate && (
-          <div className="flex-none border-b border-white/10 px-3 py-2 md:px-5 md:py-3">
-            <div className="grid grid-cols-2 gap-2 divide-x divide-white/15 md:gap-4">
-              <div className="min-w-0 pr-2 md:pr-4">
-                <p className="text-center text-[9px] font-semibold uppercase tracking-[0.18em] text-cyan-300 md:text-[10px]">
-                  Current
-                </p>
-                <p className="truncate text-center text-[10px] font-bold text-white md:text-xs">{currentLifter?.name || "—"}</p>
-                <div className="mt-1 min-w-0">
-                  <PlateStack weight={loadingWeight} includeCollars={includeCollars} />
-                </div>
-              </div>
-              <div className="min-w-0 pl-2 md:pl-4">
-                <p className="text-center text-[9px] font-semibold uppercase tracking-[0.18em] text-cyan-300 md:text-[10px]">Next</p>
-                {nextLifter && nextLoadingWeight !== null ? (
-                  <>
-                    <p className="truncate text-center text-[10px] font-bold text-cyan-100 md:text-xs">{nextLifter.name || "—"}</p>
-                    <div className="mt-1 min-w-0">
-                      <PlateStack weight={nextLoadingWeight} includeCollars={includeCollars} />
-                    </div>
-                  </>
-                ) : (
-                  <div className="mt-1 flex min-h-[160px] flex-col items-center justify-center rounded-xl border border-white/10 bg-black/30 px-2 py-6 text-center md:min-h-[200px]">
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 md:text-xs">No next lifter</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
+        {/* Flight order above plate area (non-plate layouts); plate layout: order strip then one Current | Next split — not duplicated rows. */}
+        {!hasPlate && resultsInlineLiftingOrderRow ? (
+          <div className="flex-none border-b border-white/10 px-3 py-2 md:px-5 md:py-2.5">{resultsInlineLiftingOrderRow}</div>
+        ) : null}
+
+        {hasPlate &&
+          (resultsInlineLiftingOrderRow ? (
+            <>
+              <div className="flex-none border-b border-white/10 px-3 py-2 md:px-5 md:py-2.5">{resultsInlineLiftingOrderRow}</div>
+              <div className="flex-none border-b border-white/10 px-3 py-2 md:px-5 md:py-3">{plateSplitDiagram}</div>
+            </>
+          ) : (
+            <div className="flex-none border-b border-white/10 px-3 py-2 md:px-5 md:py-3">{plateSplitDiagram}</div>
+          ))}
 
         {/* ── Bottom: results / order table — scrolls internally ── */}
         <div className="min-h-0 flex-1 overflow-auto px-3 py-2 md:px-5 md:py-3">
@@ -6810,7 +6912,7 @@ const DisplayFullPage = () => {
                 </p>
                 <div className="min-h-0 overflow-x-auto overflow-y-hidden pb-1 [-webkit-overflow-scrolling:touch]">
                   <div className="flex w-max snap-x snap-mandatory gap-2 pl-[max(0.5rem,calc(50%-6rem))] pr-[max(0.5rem,calc(50%-6rem))]">
-                    {orderedByCurrentRound.map((lifter, idx) => {
+                    {flightLineOrdered.map((lifter, idx) => {
                       const attemptWeight = getAttemptValue(lifter, currentLift, currentAttemptIndex);
                       const isCurrent = lifter.id === currentLifterId;
                       const { first, last } = splitLifterNameParts(lifter.name || "");
@@ -6845,7 +6947,7 @@ const DisplayFullPage = () => {
                     })}
                   </div>
                 </div>
-                {orderedByCurrentRound.length === 0 && (
+                {flightLineOrdered.length === 0 && (
                   <p className="text-sm text-slate-400">No lifters added yet.</p>
                 )}
               </div>
@@ -6883,36 +6985,6 @@ const DisplayFullPage = () => {
                   Download PDF
                 </button>
               </div>
-              {orderedByCurrentRound.length > 0 ? (
-                <div
-                  className={`shrink-0 overflow-x-auto rounded-xl border px-3 py-2 ${
-                    isDarkTheme ? "border-white/15 bg-black/35" : "border-slate-200 bg-slate-50"
-                  }`}
-                >
-                  <p className="whitespace-nowrap pl-[max(0.5rem,calc(50%-6rem))] pr-[max(0.5rem,calc(50%-6rem))] text-[clamp(0.58rem,1.35vw,0.72rem)] font-black uppercase leading-relaxed tracking-wide text-cyan-100">
-                    {orderedByCurrentRound.map((lifter, idx) => {
-                      const w = getAttemptValue(lifter, currentLift, currentAttemptIndex);
-                      const { first, last } = splitLifterNameParts(lifter.name || "");
-                      const namePart = last ? `${first} ${last}` : first;
-                      return (
-                        <span
-                          key={`results-order-inline-${lifter.id}`}
-                          data-display-order-lifter={lifter.id}
-                          className="inline-block scroll-m-1"
-                        >
-                          {idx > 0 ? <span className="mx-1.5 text-slate-500 sm:mx-2.5">|</span> : null}
-                          <span className="tabular-nums text-cyan-300">#{idx + 1}</span>{" "}
-                          <span>{namePart.toUpperCase()}</span>{" "}
-                          <span className={isDarkTheme ? "text-slate-500" : "text-slate-400"}>*</span>{" "}
-                          <span className="tabular-nums text-amber-200">
-                            {w === null ? "—" : `${w.toFixed(1)} KG`}
-                          </span>
-                        </span>
-                      );
-                    })}
-                  </p>
-                </div>
-              ) : null}
               <div className="min-h-0 flex-1 overflow-hidden">
                 <ResultsTable
                   rankingByGroup={rankingByGroup}

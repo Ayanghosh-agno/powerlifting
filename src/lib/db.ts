@@ -16,6 +16,8 @@ export type DbCompetition = {
   display_layout: string;
   display_theme: string;
   next_attempt_queue: unknown[];
+  /** `${lift}-${attemptIndex}` → ordered lifter ids */
+  manual_order_by_stage?: Record<string, string[]> | null;
   created_at: string;
   updated_at: string;
 };

@@ -136,6 +136,18 @@ function dbToGroup(row: Record<string, unknown>): Group {
   };
 }
 
+function parseManualOrderByStageColumn(raw: unknown): Record<string, string[]> {
+  if (raw == null) return {};
+  if (typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, string[]> = {};
+  for (const [key, val] of Object.entries(raw as Record<string, unknown>)) {
+    if (Array.isArray(val) && val.every((id) => typeof id === "string")) {
+      out[key] = val;
+    }
+  }
+  return out;
+}
+
 function competitionToDb(comp: CompetitionRecord) {
   return {
     id: comp.id,
@@ -152,6 +164,7 @@ function competitionToDb(comp: CompetitionRecord) {
     display_layout: "signal_results_plate",
     display_theme: "black",
     next_attempt_queue: comp.nextAttemptQueue,
+    manual_order_by_stage: comp.manualOrderByStage ?? {},
   };
 }
 
@@ -239,7 +252,7 @@ export function useSupabaseSync(
             competitionMode: dbComp.mode as CompetitionMode,
             activeCompetitionGroupName: dbComp.active_group_name,
             nextAttemptQueue: (dbComp.next_attempt_queue ?? []) as NextAttemptEntry[],
-            manualOrderByStage: {},
+            manualOrderByStage: parseManualOrderByStageColumn(dbComp.manual_order_by_stage),
           });
         }
 
