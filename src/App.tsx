@@ -1,4 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState, createContext, useContext, memo, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  createContext,
+  useContext,
+  memo,
+  type CSSProperties,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   HashRouter,
@@ -70,6 +82,8 @@ type AppContextValue = {
   /** When set, session order / platform flow is limited to this group name (from "Start competition" on Groups). */
   activeCompetitionGroupName: string | null;
   setActiveCompetitionGroupName: (name: string | null) => void;
+  manualOrderByStage: Record<string, string[]>;
+  setManualOrderByStage: Dispatch<SetStateAction<Record<string, string[]>>>;
   setNextAttemptQueue: (queue: NextAttemptEntry[]) => void;
   timerPhase: TimerPhase;
   timerEndsAt: number | null;
@@ -344,6 +358,7 @@ const createEmptyCompetitionState = (): PersistedState => ({
   competitionMode: "FULL_GAME",
   activeCompetitionGroupName: null,
   nextAttemptQueue: [],
+  manualOrderByStage: {},
 });
 
 const normalizeCompetitionRecord = (raw: Partial<CompetitionRecord>): CompetitionRecord => {
@@ -373,6 +388,10 @@ const normalizeCompetitionRecord = (raw: Partial<CompetitionRecord>): Competitio
           ? null
           : base.activeCompetitionGroupName,
     nextAttemptQueue: raw.nextAttemptQueue ?? base.nextAttemptQueue,
+    manualOrderByStage:
+      raw.manualOrderByStage && typeof raw.manualOrderByStage === "object" && !Array.isArray(raw.manualOrderByStage)
+        ? (raw.manualOrderByStage as Record<string, string[]>)
+        : base.manualOrderByStage,
   };
 };
 
@@ -601,6 +620,34 @@ const orderLiftersByIPF = (lifters: Lifter[], lift: LiftType, attemptIndex: numb
       if (lotA !== lotB) return lotA - lotB;
       return a.name.localeCompare(b.name);
     });
+
+/** IPF stage pool (active lifters on this attempt if any, else full flight), then optional manual order for this lift/attempt. */
+const orderLiftersForDisplayRound = (
+  lifters: Lifter[],
+  lift: LiftType,
+  attemptIndex: number,
+  manualOrderByStage: Record<string, string[]>,
+): Lifter[] => {
+  const ipfOrdered = orderLiftersByIPF(lifters, lift, attemptIndex);
+  const activeStage = ipfOrdered.filter((lifter) => {
+    const attempt = getAttempts(lifter, lift)[attemptIndex];
+    return attempt?.status !== "GOOD" && attempt?.status !== "NO";
+  });
+  const stageOrderPool = activeStage.length > 0 ? activeStage : ipfOrdered;
+  const stageKey = `${lift}-${attemptIndex}`;
+  const manual = manualOrderByStage[stageKey];
+  if (!manual || manual.length === 0) return stageOrderPool;
+
+  const rank = new Map(manual.map((id, idx) => [id, idx]));
+  return [...stageOrderPool].sort((a, b) => {
+    const idxA = rank.get(a.id);
+    const idxB = rank.get(b.id);
+    if (typeof idxA === "number" && typeof idxB === "number") return idxA - idxB;
+    if (typeof idxA === "number") return -1;
+    if (typeof idxB === "number") return 1;
+    return 0;
+  });
+};
 
 const getStageSequence = (competitionMode: CompetitionMode): { lift: LiftType; attemptIndex: number }[] =>
   competitionMode === "BENCH_ONLY"
@@ -852,6 +899,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
   const [competitionMode, setCompetitionModeState] = useState<CompetitionMode>("FULL_GAME");
   const [nextAttemptQueue, setNextAttemptQueueState] = useState<NextAttemptEntry[]>([]);
   const [activeCompetitionGroupName, setActiveCompetitionGroupNameState] = useState<string | null>(null);
+  const [manualOrderByStage, setManualOrderByStageState] = useState<Record<string, string[]>>({});
   const [, setCurrentRefereeSessionIdState] = useState<string | null>(null);
   const [currentRefreeSessionId, setCurrentRefreeSessionIdState] = useState<string | null>(null);
   const stageKeyRef = useRef<string>("");
@@ -877,6 +925,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
       setCompetitionModeState(first.competitionMode);
       setNextAttemptQueueState(first.nextAttemptQueue);
       setActiveCompetitionGroupNameState(first.activeCompetitionGroupName ?? null);
+      setManualOrderByStageState(first.manualOrderByStage ?? {});
     }
   }, []);
 
@@ -949,6 +998,14 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     broadcast({ activeCompetitionGroupName: name });
   }, [broadcast]);
 
+  const setManualOrderByStage = useCallback((value: SetStateAction<Record<string, string[]>>) => {
+    setManualOrderByStageState((prev) => {
+      const next = typeof value === "function" ? value(prev) : value;
+      broadcast({ manualOrderByStage: next });
+      return next;
+    });
+  }, [broadcast]);
+
   const hydrateCompetition = (competition: CompetitionRecord | null) => {
     if (!competition) {
       const empty = createEmptyCompetitionState();
@@ -966,6 +1023,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
       setCompetitionModeState(empty.competitionMode);
       setNextAttemptQueueState(empty.nextAttemptQueue);
       setActiveCompetitionGroupNameState(empty.activeCompetitionGroupName);
+      setManualOrderByStageState(empty.manualOrderByStage);
       return;
     }
 
@@ -983,6 +1041,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     setCompetitionModeState(competition.competitionMode);
     setNextAttemptQueueState(competition.nextAttemptQueue);
     setActiveCompetitionGroupNameState(competition.activeCompetitionGroupName ?? null);
+    setManualOrderByStageState(competition.manualOrderByStage ?? {});
   };
 
   const applyIncomingState = useCallback((data: Partial<AppContextValue>) => {
@@ -1015,6 +1074,12 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     const patchGroup = data as { activeCompetitionGroupName?: string | null };
     if (typeof patchGroup.activeCompetitionGroupName === "string" || patchGroup.activeCompetitionGroupName === null) {
       setActiveCompetitionGroupNameState(patchGroup.activeCompetitionGroupName);
+    }
+    if (typeof (data as { manualOrderByStage?: unknown }).manualOrderByStage !== "undefined") {
+      const mo = (data as { manualOrderByStage?: Record<string, string[]> }).manualOrderByStage;
+      if (mo && typeof mo === "object" && !Array.isArray(mo)) {
+        setManualOrderByStageState(mo);
+      }
     }
   }, []);
 
@@ -1152,6 +1217,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
               competitionMode,
               activeCompetitionGroupName,
               nextAttemptQueue,
+              manualOrderByStage,
             }
           : competition,
       ),
@@ -1171,6 +1237,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     competitionMode,
     activeCompetitionGroupName,
     nextAttemptQueue,
+    manualOrderByStage,
   ]);
 
   useEffect(() => {
@@ -1504,7 +1571,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
           })
         : nextAttemptQueue;
 
-    const orderedFlight = orderLiftersByIPF(sessionLifters, currentLift, currentAttemptIndex);
+    const orderedFlight = orderLiftersForDisplayRound(sessionLifters, currentLift, currentAttemptIndex, manualOrderByStage);
     if (!orderedFlight.length) return;
 
     let nextLift = currentLift;
@@ -1525,7 +1592,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
       if (nextStage) {
         nextLift = nextStage.lift;
         nextAttemptIdx = nextStage.attemptIndex;
-        const nextOrder = orderLiftersByIPF(sessionLifters, nextLift, nextAttemptIdx);
+        const nextOrder = orderLiftersForDisplayRound(sessionLifters, nextLift, nextAttemptIdx, manualOrderByStage);
         const nextActive = nextOrder.find((lifter) => {
           const attempt = getAttempts(lifter, nextLift)[nextAttemptIdx];
           return attempt?.status !== "GOOD" && attempt?.status !== "NO";
@@ -1592,7 +1659,26 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     // Reset immediately after verdict so next lifter starts with a clean signal slate.
     // The display screen keeps its own local overlay state, so this won't interrupt animations.
     resetSignals();
-  }, [lifters, currentLifterId, refereeSignals, currentLift, currentAttemptIndex, activeCompetitionGroupName, nextAttemptQueue, competitionMode, setLifters, setCurrentLift, setCurrentAttemptIndex, setCurrentLifterId, setNextAttemptQueueState, broadcast, startNextAttemptClock, clearTimerState, resetSignals]);
+  }, [
+    lifters,
+    currentLifterId,
+    refereeSignals,
+    currentLift,
+    currentAttemptIndex,
+    activeCompetitionGroupName,
+    nextAttemptQueue,
+    competitionMode,
+    manualOrderByStage,
+    setLifters,
+    setCurrentLift,
+    setCurrentAttemptIndex,
+    setCurrentLifterId,
+    setNextAttemptQueueState,
+    broadcast,
+    startNextAttemptClock,
+    clearTimerState,
+    resetSignals,
+  ]);
 
   useEffect(() => {
     const stageKey = `${currentLifterId ?? "none"}|${currentLift}|${currentAttemptIndex}`;
@@ -1640,6 +1726,8 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
         setCompetitionMode,
         activeCompetitionGroupName,
         setActiveCompetitionGroupName,
+        manualOrderByStage,
+        setManualOrderByStage,
         setNextAttemptQueue,
         timerPhase,
         timerEndsAt,
@@ -2223,6 +2311,8 @@ const ControlPage = () => {
     setCompetitionMode,
     activeCompetitionGroupName,
     setActiveCompetitionGroupName,
+    manualOrderByStage,
+    setManualOrderByStage,
     timerPhase,
     timerEndsAt,
     startAttemptClock,
@@ -2251,7 +2341,6 @@ const ControlPage = () => {
   const [updatedOrderLifterId, setUpdatedOrderLifterId] = useState<string | null>(null);
   const [draggingOrderIndex, setDraggingOrderIndex] = useState<number | null>(null);
   const [queueTimerStarts, setQueueTimerStarts] = useState<Record<string, number>>({});
-  const [manualOrderByStage, setManualOrderByStage] = useState<Record<string, string[]>>({});
   const previousOrderWeightMapRef = useRef<Record<string, number | null>>({});
   const didInitOrderWeightRef = useRef(false);
 
@@ -2270,34 +2359,24 @@ const ControlPage = () => {
   );
 
   const stageKey = `${currentLift}-${currentAttemptIndex}`;
-  const stageOrderPool = activeStageLifters.length > 0 ? activeStageLifters : ipfOrderedLifters;
-  const controlOrderLifters = useMemo(() => {
-    const manual = manualOrderByStage[stageKey];
-    if (!manual || manual.length === 0) return stageOrderPool;
-
-    const rank = new Map(manual.map((id, idx) => [id, idx]));
-    return [...stageOrderPool].sort((a, b) => {
-      const idxA = rank.get(a.id);
-      const idxB = rank.get(b.id);
-      if (typeof idxA === "number" && typeof idxB === "number") return idxA - idxB;
-      if (typeof idxA === "number") return -1;
-      if (typeof idxB === "number") return 1;
-      return 0;
-    });
-  }, [manualOrderByStage, stageKey, stageOrderPool]);
+  const stageOrderPoolBase = activeStageLifters.length > 0 ? activeStageLifters : ipfOrderedLifters;
+  const controlOrderLifters = useMemo(
+    () => orderLiftersForDisplayRound(sessionLifters, currentLift, currentAttemptIndex, manualOrderByStage),
+    [sessionLifters, currentLift, currentAttemptIndex, manualOrderByStage],
+  );
 
   useEffect(() => {
     setManualOrderByStage((prev) => {
       const current = prev[stageKey];
       if (!current || current.length === 0) return prev;
-      const validIds = new Set(stageOrderPool.map((lifter) => lifter.id));
+      const validIds = new Set(stageOrderPoolBase.map((lifter) => lifter.id));
       const cleaned = current.filter((id) => validIds.has(id));
-      const missing = stageOrderPool.map((lifter) => lifter.id).filter((id) => !cleaned.includes(id));
+      const missing = stageOrderPoolBase.map((lifter) => lifter.id).filter((id) => !cleaned.includes(id));
       const merged = [...cleaned, ...missing];
       if (JSON.stringify(merged) === JSON.stringify(current)) return prev;
       return { ...prev, [stageKey]: merged };
     });
-  }, [stageKey, stageOrderPool]);
+  }, [stageKey, stageOrderPoolBase, setManualOrderByStage]);
 
   useEffect(() => {
     const nextMap: Record<string, number | null> = {};
@@ -2385,16 +2464,6 @@ const ControlPage = () => {
       setCurrentLifterId(activeStageLifters[0].id);
     }
   }, [activeStageLifters, currentLifterId, currentLifter, currentLift, currentAttemptIndex, timerPhase, setCurrentLifterId]);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      const topLifterId = stageOrderPool[0]?.id ?? null;
-      if (topLifterId && topLifterId !== currentLifterId) {
-        setCurrentLifterId(topLifterId);
-      }
-    }, 500);
-    return () => window.clearInterval(timer);
-  }, [stageOrderPool, currentLifterId, setCurrentLifterId]);
 
   const currentDisplayWeight = currentLifter ? resolveAttemptWeight(currentLifter, currentLift, currentAttemptIndex) : 20;
   const loadingDisplayWeight = currentDisplayWeight;
@@ -2486,8 +2555,8 @@ const ControlPage = () => {
     queuedAttemptRows[0]?.entry ??
     null;
 
-  // Keep highlight pinned to the first IPF-sorted row (lowest valid attempt).
-  const highlightedOrderLifterId = visibleOrderLifters[0]?.id ?? stageOrderPool[0]?.id ?? currentLifterId;
+  // Highlight: first visible row after search, else first in stage pool (IPF base order).
+  const highlightedOrderLifterId = visibleOrderLifters[0]?.id ?? stageOrderPoolBase[0]?.id ?? currentLifterId;
 
   const resetControlOrderToIPF = () => {
     setManualOrderByStage((prev) => {
@@ -2496,12 +2565,12 @@ const ControlPage = () => {
       delete next[stageKey];
       return next;
     });
-    if (stageOrderPool.length === 0) {
+    if (stageOrderPoolBase.length === 0) {
       setActionNotice("No lifters available for ordering.");
       return;
     }
-    if (stageOrderPool[0]?.id) {
-      setCurrentLifterId(stageOrderPool[0].id);
+    if (stageOrderPoolBase[0]?.id) {
+      setCurrentLifterId(stageOrderPoolBase[0].id);
     }
     setActionNotice("IPF order auto-sorted by attempt, bodyweight, and lot.");
   };
@@ -2619,11 +2688,15 @@ const ControlPage = () => {
       activeCompetitionGroupName !== null
         ? merged.filter((l) => isInGroup(l.group, activeCompetitionGroupName))
         : merged;
-    const nextActive = orderLiftersByIPF(orderPool, currentLift, currentAttemptIndex).find((row) => {
+    const nextActive = orderLiftersForDisplayRound(orderPool, currentLift, currentAttemptIndex, manualOrderByStage).find((row) => {
       const attempt = getAttempts(row, currentLift)[currentAttemptIndex];
       return attempt?.status !== "GOOD" && attempt?.status !== "NO";
     });
-    setCurrentLifterId(nextActive?.id ?? orderLiftersByIPF(orderPool, currentLift, currentAttemptIndex)[0]?.id ?? null);
+    setCurrentLifterId(
+      nextActive?.id ??
+        orderLiftersForDisplayRound(orderPool, currentLift, currentAttemptIndex, manualOrderByStage)[0]?.id ??
+        null,
+    );
 
     setActionNotice("Lifter updated. Control, Results, and Display are synced.");
     cancelOrderEdit();
@@ -3023,10 +3096,17 @@ const ControlPage = () => {
                     )}
                     <button
                       onClick={() => {
+                        if (orderIndex > 0) {
+                          reorderCurrentStage(orderIndex, 0);
+                        }
                         setCurrentLifterId(lifter.id);
                         setCurrentLift(currentLift);
                         setCurrentAttemptIndex(currentAttemptIndex);
-                        setActionNotice(`Current lifter set: ${lifter.name}`);
+                        setActionNotice(
+                          orderIndex > 0
+                            ? `Current lifter set: ${lifter.name} — moved to top of order.`
+                            : `Current lifter set: ${lifter.name}`,
+                        );
                       }}
                       className="h-9 rounded bg-cyan-500 px-3 text-sm font-semibold text-black"
                     >
@@ -5555,6 +5635,7 @@ const ScreenPage = () => {
     activeCompetitionGroupName,
     competitions,
     activeCompetitionId,
+    manualOrderByStage,
   } = useAppContext();
   const [screenType, setScreenType] = useState("signal_results_plate");
 
@@ -5579,6 +5660,7 @@ const ScreenPage = () => {
       timerPhase,
       timerEndsAt,
       activeCompetitionGroupName,
+      manualOrderByStage,
     });
     const seedValue = encodeUrlSeed(seededCompetition);
     const seedParam = seedValue ? `&seed=${encodeURIComponent(seedValue)}` : "";
@@ -5603,6 +5685,7 @@ const ScreenPage = () => {
       timerPhase,
       timerEndsAt,
       activeCompetitionGroupName,
+      manualOrderByStage,
     };
 
     // Retry a few times so the new tab receives state even if it boots slowly on mobile webviews.
@@ -6282,6 +6365,7 @@ const DisplayFullPage = () => {
     activeCompetitionName,
     competitionMode,
     groups,
+    manualOrderByStage,
   } = useAppContext();
   const [searchParams] = useSearchParams();
   const rawLayout = searchParams.get("layout") || "signal_results_plate";
@@ -6502,8 +6586,8 @@ const DisplayFullPage = () => {
   const displaySessionLifters = competitionScopedLifters;
 
   const orderedByCurrentRound = useMemo(
-    () => orderLiftersByIPF(displaySessionLifters, currentLift, currentAttemptIndex),
-    [displaySessionLifters, currentLift, currentAttemptIndex],
+    () => orderLiftersForDisplayRound(displaySessionLifters, currentLift, currentAttemptIndex, manualOrderByStage),
+    [displaySessionLifters, currentLift, currentAttemptIndex, manualOrderByStage],
   );
   const currentOrderIndex = currentLifter ? orderedByCurrentRound.findIndex((lifter) => lifter.id === currentLifter.id) : -1;
   const nextLifter =

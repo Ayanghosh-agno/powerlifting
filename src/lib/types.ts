@@ -50,6 +50,8 @@ export type CompetitionRecord = {
   competitionMode: CompetitionMode;
   activeCompetitionGroupName: string | null;
   nextAttemptQueue: NextAttemptEntry[];
+  /** Per-stage manual lifter order (`"${lift}-${attemptIndex}"` → ordered ids). */
+  manualOrderByStage: Record<string, string[]>;
 };
 
 export type PersistedState = {
@@ -67,6 +69,7 @@ export type PersistedState = {
   competitionMode: CompetitionMode;
   activeCompetitionGroupName: string | null;
   nextAttemptQueue: NextAttemptEntry[];
+  manualOrderByStage: Record<string, string[]>;
 };
 
 export type DbRefereeSession = {

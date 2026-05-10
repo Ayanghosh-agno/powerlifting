@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Barbell">
+  <defs>
+    <linearGradient id="bar" x1="0%" y1="50%" x2="100%" y2="50%">
+      <stop offset="0%" stop-color="#94a3b8"/>
+      <stop offset="50%" stop-color="#e2e8f0"/>
+      <stop offset="100%" stop-color="#64748b"/>
+    </linearGradient>
+  </defs>
+  <!-- tab background -->
+  <rect width="32" height="32" rx="7" fill="#0f172a"/>
+  <!-- left plates: red ? blue ? yellow -->
+  <rect x="3" y="7" width="4" height="18" rx="1" fill="#dc2626"/>
+  <rect x="6.5" y="9" width="3" height="14" rx="0.75" fill="#2563eb"/>
+  <rect x="9" y="11" width="2.5" height="10" rx="0.5" fill="#eab308"/>
+  <!-- bar -->
+  <rect x="11.5" y="13.75" width="9" height="4.5" rx="1.25" fill="url(#bar)"/>
+  <!-- right plates: yellow ? blue ? red -->
+  <rect x="20.5" y="11" width="2.5" height="10" rx="0.5" fill="#eab308"/>
+  <rect x="22.5" y="9" width="3" height="14" rx="0.75" fill="#2563eb"/>
+  <rect x="25" y="7" width="4" height="18" rx="1" fill="#dc2626"/>
+</svg>

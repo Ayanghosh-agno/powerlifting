@@ -51,6 +51,7 @@ type CompetitionRecord = {
   competitionMode: CompetitionMode;
   activeCompetitionGroupName: string | null;
   nextAttemptQueue: NextAttemptEntry[];
+  manualOrderByStage: Record<string, string[]>;
 };
 
 export type ConnectedRefereeSlots = {
@@ -238,6 +239,7 @@ export function useSupabaseSync(
             competitionMode: dbComp.mode as CompetitionMode,
             activeCompetitionGroupName: dbComp.active_group_name,
             nextAttemptQueue: (dbComp.next_attempt_queue ?? []) as NextAttemptEntry[],
+            manualOrderByStage: {},
           });
         }
 

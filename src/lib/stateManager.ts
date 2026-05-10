@@ -24,6 +24,7 @@ type BroadcastPayload = Partial<{
   competitionMode: CompetitionMode;
   activeCompetitionGroupName: string | null;
   nextAttemptQueue: NextAttemptEntry[];
+  manualOrderByStage: Record<string, string[]>;
   competitions: CompetitionRecord[];
   activeCompetitionId: string | null;
 }>;
