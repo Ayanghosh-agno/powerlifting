@@ -353,6 +353,18 @@ export function useSupabaseSync(
       }
     };
 
+    // Never trust incremental merges alone: the in-memory snapshot can stay stale across a
+    // table clear (DELETE bursts / missed old row) or tab backgrounding. Re-fetch the full
+    // row set after any realtime change so only DB truth drives left/center/right.
+    let signalsRefetchTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleSignalsRefetch = () => {
+      if (signalsRefetchTimer) clearTimeout(signalsRefetchTimer);
+      signalsRefetchTimer = setTimeout(() => {
+        signalsRefetchTimer = null;
+        void fetchAll();
+      }, 80);
+    };
+
     const channel = supabase
       .channel(`referee-signals-${activeCompetitionId}`)
       .on(
@@ -363,9 +375,8 @@ export function useSupabaseSync(
           table: "referee_signals",
           filter: `competition_id=eq.${activeCompetitionId}`,
         },
-        (payload) => {
-          applyRow(payload.new as { position: number; signal: string | null });
-          onRefereeSignalsChanged([...signalsSnapshot]);
+        () => {
+          scheduleSignalsRefetch();
         }
       )
       .on(
@@ -376,9 +387,8 @@ export function useSupabaseSync(
           table: "referee_signals",
           filter: `competition_id=eq.${activeCompetitionId}`,
         },
-        (payload) => {
-          applyRow(payload.new as { position: number; signal: string | null });
-          onRefereeSignalsChanged([...signalsSnapshot]);
+        () => {
+          scheduleSignalsRefetch();
         }
       )
       .on(
@@ -389,10 +399,8 @@ export function useSupabaseSync(
           table: "referee_signals",
           filter: `competition_id=eq.${activeCompetitionId}`,
         },
-        (payload) => {
-          const pos = (payload.old as { position?: number }).position;
-          if (pos !== undefined && pos >= 0 && pos <= 2) signalsSnapshot[pos] = null;
-          onRefereeSignalsChanged([...signalsSnapshot]);
+        () => {
+          scheduleSignalsRefetch();
         }
       )
       .subscribe();
@@ -400,6 +408,7 @@ export function useSupabaseSync(
     fetchAll();
 
     return () => {
+      if (signalsRefetchTimer) clearTimeout(signalsRefetchTimer);
       supabase.removeChannel(channel);
     };
   }, [activeCompetitionId, onRefereeSignalsChanged]);
@@ -449,7 +458,18 @@ export function useSupabaseSync(
       if (!isSupabaseConfigured || !activeCompetitionId) return;
       try {
         await dbRefereeSignals.upsertSignal(activeCompetitionId, position, signal, deviceId, sessionId);
-      } catch {
+      } catch (error) {
+        // Important: don't silently swallow signal-write failures.
+        // On the referee phones, this explains why presence says "Connected"
+        // but `referee_signals` rows never appear.
+        console.error("Failed to publish referee signal", {
+          activeCompetitionId,
+          position,
+          signal,
+          sessionId,
+          deviceId,
+          error,
+        });
       }
     },
     [activeCompetitionId, deviceId, sessionId]

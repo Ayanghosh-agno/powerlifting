@@ -200,22 +200,38 @@ export const dbRefereeSignals = {
     deviceId: string,
     sessionId?: string | null
   ): Promise<void> {
-    const { error } = await supabase
-      .from("referee_signals")
-      .upsert(
-        {
-          competition_id: competitionId,
-          position,
-          signal,
-          device_id: deviceId,
-          session_id: sessionId || null,
-          last_updated_by_device_id: deviceId,
-          submitted_at: signal ? new Date().toISOString() : null,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "competition_id,position" }
-      );
-    if (error) throw error;
+    // Backward compatibility:
+    // Older DB_SETUP_SQL versions create `referee_signals` without these columns:
+    //   session_id, last_updated_by_device_id, submitted_at
+    // If those columns don't exist, Supabase will reject the upsert. We try the full
+    // payload first, then fallback to the minimal set used by the older schema.
+    const nowIso = new Date().toISOString();
+    const baseRow = {
+      competition_id: competitionId,
+      position,
+      signal,
+      device_id: deviceId,
+      updated_at: nowIso,
+    };
+    const fullRow = {
+      ...baseRow,
+      session_id: sessionId || null,
+      last_updated_by_device_id: deviceId,
+      submitted_at: signal ? nowIso : null,
+    };
+
+    try {
+      const { error } = await supabase
+        .from("referee_signals")
+        .upsert(fullRow, { onConflict: "competition_id,position" });
+      if (error) throw error;
+    } catch (err) {
+      // Fallback path for older DB schema; still update the core signal state.
+      const { error: fallbackError } = await supabase
+        .from("referee_signals")
+        .upsert(baseRow, { onConflict: "competition_id,position" });
+      if (fallbackError) throw fallbackError;
+    }
   },
 
   async clearAll(competitionId: string): Promise<void> {

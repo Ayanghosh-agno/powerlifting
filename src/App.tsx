@@ -5443,10 +5443,17 @@ const RefereeStationPage = () => {
       if (navigator.vibrate) navigator.vibrate(80);
       const nextSignals = refereeSignals.map((signal, idx) => (idx === config.index ? decision : signal));
       publishRefereeSignal(config.index, decision);
-      commitTimeoutRef.current = window.setTimeout(() => {
-        setRefereeSignals(nextSignals);
+      // Optimistic local update is only needed when we're not syncing via Supabase.
+      // In Supabase mode, we rely on realtime `refereeSignals` updates to avoid
+      // races where a reset happens before this delayed local write runs.
+      if (!isSupabaseConfigured) {
+        commitTimeoutRef.current = window.setTimeout(() => {
+          setRefereeSignals(nextSignals);
+          commitTimeoutRef.current = null;
+        }, 90);
+      } else {
         commitTimeoutRef.current = null;
-      }, 90);
+      }
       holdTimeoutRef.current = null;
       setPendingDecision(null);
       setDecisionEndsAt(null);
@@ -5587,7 +5594,6 @@ const ScreenPage = () => {
     lifters,
     groups,
     currentLifterId,
-    refereeSignals,
     refereeInputLocked,
     currentLift,
     currentAttemptIndex,
@@ -5610,6 +5616,10 @@ const ScreenPage = () => {
   const openDisplayScreen = () => {
     const activeCompetitionName =
       competitions.find((c) => c.id === activeCompetitionId)?.name ?? "Competition";
+    // Live display reads referee signals from Supabase realtime / relay — do not embed
+    // the opener's current `refereeSignals` in the URL seed or postMessage bootstrap.
+    // Otherwise a tab opened while the controller still had old lights re-applies them
+    // after the DB has cleared `referee_signals`, so the result screen shows stale votes.
     const seededCompetition = normalizeCompetitionRecord({
       id: activeCompetitionId ?? `comp-${Date.now()}`,
       name: activeCompetitionName,
@@ -5617,7 +5627,7 @@ const ScreenPage = () => {
       lifters,
       groups,
       currentLifterId,
-      refereeSignals,
+      refereeSignals: [null, null, null],
       refereeInputLocked,
       currentLift,
       currentAttemptIndex,
@@ -5643,7 +5653,7 @@ const ScreenPage = () => {
       lifters,
       groups,
       currentLifterId,
-      refereeSignals,
+      refereeSignals: [null, null, null],
       refereeInputLocked,
       currentLift,
       currentAttemptIndex,
@@ -6520,8 +6530,11 @@ const DisplayFullPage = () => {
   const [overlayPhase, setOverlayPhase] = useState<"circles" | "lift" | "no-lift" | null>(null);
   const [isFinalVerdictAnimating, setIsFinalVerdictAnimating] = useState(false);
   const prevSignalsRef = useRef<string>("");
+  /** Set synchronously when verdict timers start; Supabase may clear rows before `isFinalVerdictAnimating` commits. */
+  const verdictPlaybackRef = useRef(false);
   const overlayHideTimeoutRef = useRef<number | null>(null);
   const overlayPhaseTimeoutRef = useRef<number | null>(null);
+  const prevLiveRefereeCountRef = useRef(-1);
 
   const activeTheme = DISPLAY_THEME_CONFIG[displayTheme];
   const isDarkTheme = activeTheme.tone === "dark";
@@ -6600,6 +6613,20 @@ const DisplayFullPage = () => {
   }, [currentLifterId, currentLifter, setCurrentLifterId]);
 
   useEffect(() => {
+    const count = refereeSignals.filter((s) => s !== null).length;
+    if (count === prevLiveRefereeCountRef.current) return;
+    prevLiveRefereeCountRef.current = count;
+    const slots = { left: refereeSignals[0], center: refereeSignals[1], right: refereeSignals[2] };
+    if (count === 1) {
+      console.log("[Results screen] Referee signals received: 1 / 3", slots);
+    } else if (count === 2) {
+      console.log("[Results screen] Referee signals received: 2 / 3", slots);
+    } else if (count === 3) {
+      console.log("[Results screen] Referee signals received: 3 / 3 (all in)", slots);
+    }
+  }, [refereeSignals]);
+
+  useEffect(() => {
     const signalsStr = JSON.stringify(refereeSignals);
     if (signalsStr === prevSignalsRef.current) return;
     prevSignalsRef.current = signalsStr;
@@ -6607,44 +6634,68 @@ const DisplayFullPage = () => {
     const hasAnySignal = refereeSignals.some((signal) => signal !== null);
     const allSignalsReceived = refereeSignals.every((signal) => signal !== null);
 
-    if (hasAnySignal) {
-      setDisplaySignals(refereeSignals);
-
-      if (!allSignalsReceived) {
-        if (isFinalVerdictAnimating) return;
-        setOverlayPhase(null);
-        setShowSignalOverlay(true);
-      } else {
-        setIsFinalVerdictAnimating(true);
+    if (!hasAnySignal) {
+      // Controller often clears `referee_signals` immediately after all 3 votes (same moment as
+      // verdict). Do not tear down verdict timers/phase until `completeAnimation` runs — otherwise
+      // the result overlay never appears.
+      if (verdictPlaybackRef.current) {
         setShowSignalOverlay(false);
-        /** Same rule as applyRefereeDecision: ≥2 NO → no lift; otherwise good lift (e.g. 2 GOOD + 1 NO). */
-        const noVotes = refereeSignals.filter((s) => s === "NO").length;
-        const verdictIsGood = noVotes < 2;
+        return undefined;
+      }
+      // Context cleared (e.g. DB delete / reset) — drop local overlay copy.
+      setDisplaySignals([null, null, null]);
+      setShowSignalOverlay(false);
+      setOverlayPhase(null);
+      setIsFinalVerdictAnimating(false);
+      if (overlayHideTimeoutRef.current) {
+        window.clearTimeout(overlayHideTimeoutRef.current);
+        overlayHideTimeoutRef.current = null;
+      }
+      if (overlayPhaseTimeoutRef.current) {
+        window.clearTimeout(overlayPhaseTimeoutRef.current);
+        overlayPhaseTimeoutRef.current = null;
+      }
+      return undefined;
+    }
 
-        if (overlayPhaseTimeoutRef.current) window.clearTimeout(overlayPhaseTimeoutRef.current);
-        if (overlayHideTimeoutRef.current) window.clearTimeout(overlayHideTimeoutRef.current);
+    setDisplaySignals(refereeSignals);
 
-        const completeAnimation = async () => {
-          setOverlayPhase(null);
-          setShowSignalOverlay(false);
-          setDisplaySignals([null, null, null]);
+    if (!allSignalsReceived) {
+      if (isFinalVerdictAnimating) return undefined;
+      setOverlayPhase(null);
+      setShowSignalOverlay(true);
+    } else {
+      verdictPlaybackRef.current = true;
+      setIsFinalVerdictAnimating(true);
+      setShowSignalOverlay(false);
+      /** Same rule as applyRefereeDecision: ≥2 NO → no lift; otherwise good lift (e.g. 2 GOOD + 1 NO). */
+      const noVotes = refereeSignals.filter((s) => s === "NO").length;
+      const verdictIsGood = noVotes < 2;
 
-          resetSignals();
-          setIsFinalVerdictAnimating(false);
-        };
+      if (overlayPhaseTimeoutRef.current) window.clearTimeout(overlayPhaseTimeoutRef.current);
+      if (overlayHideTimeoutRef.current) window.clearTimeout(overlayHideTimeoutRef.current);
 
-        if (verdictIsGood) {
-          setOverlayPhase("circles");
-          overlayPhaseTimeoutRef.current = window.setTimeout(() => setOverlayPhase("lift"), 2000);
-          overlayHideTimeoutRef.current = window.setTimeout(() => {
-            completeAnimation().catch(console.error);
-          }, RESULT_OVERLAY_DISPLAY_MS);
-        } else {
-          setOverlayPhase("no-lift");
-          overlayHideTimeoutRef.current = window.setTimeout(() => {
-            completeAnimation().catch(console.error);
-          }, RESULT_OVERLAY_DISPLAY_MS);
-        }
+      const completeAnimation = async () => {
+        verdictPlaybackRef.current = false;
+        setOverlayPhase(null);
+        setShowSignalOverlay(false);
+        setDisplaySignals([null, null, null]);
+
+        resetSignals();
+        setIsFinalVerdictAnimating(false);
+      };
+
+      if (verdictIsGood) {
+        setOverlayPhase("circles");
+        overlayPhaseTimeoutRef.current = window.setTimeout(() => setOverlayPhase("lift"), 2000);
+        overlayHideTimeoutRef.current = window.setTimeout(() => {
+          completeAnimation().catch(console.error);
+        }, RESULT_OVERLAY_DISPLAY_MS);
+      } else {
+        setOverlayPhase("no-lift");
+        overlayHideTimeoutRef.current = window.setTimeout(() => {
+          completeAnimation().catch(console.error);
+        }, RESULT_OVERLAY_DISPLAY_MS);
       }
     }
     return undefined;
