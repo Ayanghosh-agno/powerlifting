@@ -759,6 +759,20 @@ const getStageSequence = (competitionMode: CompetitionMode): { lift: LiftType; a
         { lift: "deadlift", attemptIndex: 2 },
       ];
 
+/** Every non-DQ lifter has a final verdict on every scheduled attempt (SQ/BP/DL×3 or bench×3). UNATTEMPTED/PENDING count as incomplete. */
+const isSessionFlightFullyResolved = (pool: Lifter[], competitionMode: CompetitionMode): boolean => {
+  const stages = getStageSequence(competitionMode);
+  const active = pool.filter((l) => !l.disqualified);
+  if (active.length === 0) return false;
+  for (const lifter of active) {
+    for (const { lift, attemptIndex } of stages) {
+      const attempt = getAttempts(lifter, lift)[attemptIndex];
+      if (!attempt || (attempt.status !== "GOOD" && attempt.status !== "NO")) return false;
+    }
+  }
+  return true;
+};
+
 const getStageRank = (entry: NextAttemptEntry, competitionMode: CompetitionMode) => {
   const sequence = getStageSequence(competitionMode);
   const idx = sequence.findIndex((stage) => stage.lift === entry.lift && stage.attemptIndex === entry.attemptIndex);
@@ -1712,8 +1726,18 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
       }
     }
 
+    // Prime the next platform attempt as PENDING only when focus actually moved (another lifter
+    // and/or another lift or attempt). On the final attempt of the final lifter (bench-only BP3
+    // or full meet DL3), there is no next stage — nextLifterId stays the current lifter and
+    // nextLift/nextAttemptIdx are unchanged. Running the block below would overwrite the verdict
+    // we just wrote (GOOD/NO) back to PENDING, so the last lift "does not save".
+    const platformMoved =
+      nextLifterId !== currentLifterId ||
+      nextLift !== currentLift ||
+      nextAttemptIdx !== currentAttemptIndex;
+
     const nextIdx = updated.findIndex((l) => l.id === nextLifterId);
-    if (nextIdx >= 0) {
+    if (platformMoved && nextIdx >= 0) {
       const nextLifter = updated[nextIdx];
       const nextAttempts = [...getAttempts(nextLifter, nextLift)];
       const focusAttempt = nextAttempts[nextAttemptIdx];
@@ -2512,6 +2536,11 @@ const ControlPage = () => {
     });
   }, [controlOrderLifters, ipfOrderSearchTerm]);
 
+  const sessionFlightComplete = useMemo(
+    () => isSessionFlightFullyResolved(sessionLifters, competitionMode),
+    [sessionLifters, competitionMode],
+  );
+
   const currentLifter = lifters.find((l) => l.id === currentLifterId) ?? null;
 
   useEffect(() => {
@@ -3069,6 +3098,19 @@ const ControlPage = () => {
                 className="h-10 w-full rounded-lg border border-white/20 bg-black/40 px-3 text-sm text-white"
               />
             </div>
+            {sessionFlightComplete ? (
+              <div
+                role="status"
+                className="mb-3 rounded-xl border border-emerald-400/45 bg-emerald-500/15 px-4 py-3 text-center"
+              >
+                <p className="text-sm font-bold uppercase tracking-[0.18em] text-emerald-200">All lifters complete</p>
+                <p className="mt-1 text-xs leading-snug text-emerald-100/90">
+                  Everyone in this session has finished their scheduled attempts (
+                  {competitionMode === "BENCH_ONLY" ? "bench press only" : "squat, bench, deadlift"}). You can review or
+                  fix results in Manage Lifters if needed.
+                </p>
+              </div>
+            ) : null}
             <div className="space-y-2">
               {visibleOrderLifters.map((lifter, index) => {
                 const orderIndex = controlOrderLifters.findIndex((row) => row.id === lifter.id);
