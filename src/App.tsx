@@ -303,8 +303,6 @@ const getRefereeConfig = (slot: string | undefined) =>
 const REFEREE_PRESENCE_PREFIX = "powerliftinglive.refereePresence";
 const REFEREE_HEARTBEAT_MS = 2000;
 const REFEREE_PRESENCE_TTL_MS = 7000;
-const REMOTE_RELAY_BASE = "https://ntfy.sh";
-const REMOTE_RELAY_PREFIX = "powerliftingcomp";
 
 type RefereePresenceMap = Partial<Record<RefereeSlot, number>>;
 
@@ -366,12 +364,6 @@ const getHashSearchParams = () => {
   const queryIndex = hash.indexOf("?");
   if (queryIndex === -1) return new URLSearchParams();
   return new URLSearchParams(hash.slice(queryIndex + 1));
-};
-
-const toRelayTopic = (competitionId: string | null) => {
-  if (!competitionId) return "";
-  const cleaned = competitionId.toLowerCase().replace(/[^a-z0-9_-]/g, "-").slice(0, 80);
-  return `${REMOTE_RELAY_PREFIX}-${cleaned}`;
 };
 
 const createEmptyCompetitionState = (): PersistedState => ({
@@ -981,7 +973,6 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     localStorage.setItem(STORAGE_MIGRATION_FLAG_KEY, "1");
   }, []);
   const seedAppliedRef = useRef(false);
-  const relayClientIdRef = useRef(`relay-${Math.random().toString(36).slice(2, 10)}-${Date.now().toString(36)}`);
   const deviceIdRef = useRef(`device-${Math.random().toString(36).slice(2, 10)}-${Date.now().toString(36)}`);
   const [connectedRefereeSlots, setConnectedRefereeSlots] = useState<ConnectedRefereeSlots>({
     left: false,
@@ -1067,30 +1058,10 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     user?.id ?? null,
   );
 
-  const publishRemotePatch = useCallback((patch: Partial<AppContextValue>) => {
-    if (isDisplayScreen || !activeCompetitionId) return;
-    const topic = toRelayTopic(activeCompetitionId);
-    if (!topic) return;
-
-    const relayPayload = {
-      senderId: relayClientIdRef.current,
-      competitionId: activeCompetitionId,
-      patch,
-      ts: Date.now(),
-    };
-    fetch(`${REMOTE_RELAY_BASE}/${topic}`, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain;charset=UTF-8" },
-      body: JSON.stringify(relayPayload),
-      keepalive: true,
-    }).catch(() => null);
-  }, [isDisplayScreen, activeCompetitionId]);
-
   const broadcast = useCallback((next: Partial<AppContextValue>) => {
     if (isDisplayScreen) return;
     socket.emit("SYNC_STATE", next);
-    publishRemotePatch(next);
-  }, [isDisplayScreen, publishRemotePatch]);
+  }, [isDisplayScreen]);
 
   const setTimerState = useCallback((phase: TimerPhase, endsAt: number | null) => {
     setTimerPhaseState(phase);
@@ -1384,35 +1355,6 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     window.addEventListener("message", handleBootstrapMessage);
     return () => window.removeEventListener("message", handleBootstrapMessage);
   }, [applyIncomingState]);
-
-  useEffect(() => {
-    if (!activeCompetitionId) return;
-    const topic = toRelayTopic(activeCompetitionId);
-    if (!topic) return;
-
-    const source = new EventSource(`${REMOTE_RELAY_BASE}/${topic}/sse`);
-    source.onmessage = (event) => {
-      try {
-        const payload = JSON.parse(event.data) as { event?: string; message?: string };
-        if (payload.event && payload.event !== "message") return;
-        if (typeof payload.message !== "string" || !payload.message.trim()) return;
-        const relayMessage = JSON.parse(payload.message) as {
-          senderId?: string;
-          competitionId?: string;
-          patch?: Partial<AppContextValue>;
-        };
-        if (!relayMessage || relayMessage.senderId === relayClientIdRef.current) return;
-        if (relayMessage.competitionId !== activeCompetitionId) return;
-        if (relayMessage.patch) applyIncomingState(relayMessage.patch);
-      } catch {
-        // Ignore malformed relay data from public topic traffic.
-      }
-    };
-
-    return () => {
-      source.close();
-    };
-  }, [activeCompetitionId, applyIncomingState]);
 
   const setNextAttemptQueue = useCallback((queue: NextAttemptEntry[]) => {
     setNextAttemptQueueState(queue);
