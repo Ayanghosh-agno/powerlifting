@@ -1188,6 +1188,11 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     if (typeof (data as { activeCompetitionId?: string | null }).activeCompetitionId !== "undefined") {
       setActiveCompetitionIdState((data as { activeCompetitionId?: string | null }).activeCompetitionId ?? null);
     }
+    // With Supabase, platform/lifter session state is authoritative from DB realtime — not tab localStorage sync.
+    if (isSupabaseConfigured) {
+      if (typeof data.refereeInputLocked === "boolean") setRefereeInputLockedState(data.refereeInputLocked);
+      return;
+    }
     if (data.lifters) setLiftersState(data.lifters.map((l) => normalizeLifter(l)));
     if (data.groups) setGroupsState(data.groups.map((g) => normalizeGroup(g)));
     if (typeof data.currentLifterId !== "undefined") setCurrentLifterIdState(data.currentLifterId);
@@ -1238,9 +1243,11 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
 
       setCompetitionsState(normalizedCompetitions);
       setActiveCompetitionIdState(defaultActiveId);
-      const activeCompetition =
-        normalizedCompetitions.find((competition) => competition.id === defaultActiveId) ?? null;
-      hydrateCompetition(activeCompetition);
+      if (!isSupabaseConfigured) {
+        const activeCompetition =
+          normalizedCompetitions.find((competition) => competition.id === defaultActiveId) ?? null;
+        hydrateCompetition(activeCompetition);
+      }
       return;
     }
 
@@ -1317,6 +1324,13 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => {
     if (!lifters.length) {
       if (currentLifterId !== null) setCurrentLifterIdState(null);
+      return;
+    }
+    if (isSupabaseConfigured) {
+      // Trust DB session sync for current lifter; only clear if the lifter was removed.
+      if (currentLifterId && !lifters.some((l) => l.id === currentLifterId)) {
+        setCurrentLifterIdState(null);
+      }
       return;
     }
     const pool =
@@ -1462,6 +1476,11 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     const target = competitions.find((competition) => competition.id === competitionId);
     if (!target) return;
     setActiveCompetitionIdState(target.id);
+    if (isSupabaseConfigured) {
+      // Session channel refetches from DB; avoid hydrating stale localStorage snapshot.
+      broadcast({ activeCompetitionId: target.id });
+      return;
+    }
     hydrateCompetition(target);
     broadcast({
       activeCompetitionId: target.id,
@@ -2412,7 +2431,11 @@ const CompetitionPage = () => {
 };
 
 const ControlPage = () => {
+  const [searchParams] = useSearchParams();
   const {
+    competitions,
+    activeCompetitionId,
+    switchCompetition,
     lifters,
     setLifters,
     groups,
@@ -2439,6 +2462,16 @@ const ControlPage = () => {
     applyRefereeDecision,
     resetSignals,
   } = useAppContext();
+
+  useEffect(() => {
+    const requestedCompetitionId = searchParams.get("cid")?.trim() || "";
+    if (requestedCompetitionId && requestedCompetitionId !== activeCompetitionId) {
+      const exists = competitions.some((competition) => competition.id === requestedCompetitionId);
+      if (exists) {
+        switchCompetition(requestedCompetitionId);
+      }
+    }
+  }, [searchParams, activeCompetitionId, competitions, switchCompetition]);
 
   const sessionLifters = useMemo(
     () =>
@@ -2574,7 +2607,9 @@ const ControlPage = () => {
     setActionNotice(`Group stage applied: ${targetLift.toUpperCase()} A${targetAttemptIndex + 1}`);
   }, [activeCompetitionGroupName, competitionMode, currentLifter, currentLift, groups, lifters, setCurrentAttemptIndex, setCurrentLift]);
 
+  // Offline-only: auto-advance to first incomplete lifter in the round. With Supabase, current lifter comes from DB realtime.
   useEffect(() => {
+    if (isSupabaseConfigured) return;
     if (timerPhase === "NEXT_ATTEMPT") return;
     if (!activeStageLifters.length) return;
 

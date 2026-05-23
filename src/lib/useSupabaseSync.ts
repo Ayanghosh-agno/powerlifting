@@ -488,6 +488,20 @@ export function useSupabaseSync(
           dbGroupRows as Record<string, unknown>[],
         );
 
+        // Drop stale local debounced writes so they cannot overwrite the remote session we are about to apply.
+        if (compSaveRef.current) {
+          clearTimeout(compSaveRef.current);
+          compSaveRef.current = null;
+        }
+        if (lifterSaveRef.current) {
+          clearTimeout(lifterSaveRef.current);
+          lifterSaveRef.current = null;
+        }
+        if (groupSaveRef.current) {
+          clearTimeout(groupSaveRef.current);
+          groupSaveRef.current = null;
+        }
+
         // Mark remote snapshot as saved so writers do not immediately re-upsert the same payload.
         if (!readOnly) {
           const compRecord: CompetitionRecord = {
