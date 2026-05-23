@@ -241,8 +241,6 @@ function sessionFingerprint(session: CompetitionSessionFromDb, competitionId: st
 
 const SESSION_REFETCH_DEBOUNCE_MS = 600;
 const LIFTER_SAVE_DEBOUNCE_MS = 800;
-/** Ignore our own DB writes echoing back through Realtime for this long. */
-const REMOTE_FETCH_MUTE_MS = 2000;
 
 type DbLifterRow = ReturnType<typeof lifterToDb>;
 type DbGroupRow = ReturnType<typeof groupToDb>;
@@ -347,16 +345,36 @@ export function useSupabaseSync(
   const groupSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const presenceChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const lastAppliedSessionFingerprintRef = useRef<string>("");
-  const remoteSessionFetchMutedUntilRef = useRef(0);
   const sessionRefsSeededRef = useRef(false);
 
-  const muteRemoteSessionFetch = useCallback((durationMs = REMOTE_FETCH_MUTE_MS) => {
-    remoteSessionFetchMutedUntilRef.current = Date.now() + durationMs;
-  }, []);
+  const markLocalSessionFingerprint = useCallback(
+    (session: CompetitionSessionFromDb) => {
+      if (!activeCompetitionId) return;
+      lastAppliedSessionFingerprintRef.current = sessionFingerprint(session, activeCompetitionId);
+    },
+    [activeCompetitionId],
+  );
 
-  const shouldMuteRemoteSessionFetch = useCallback(() => {
-    return Date.now() < remoteSessionFetchMutedUntilRef.current;
-  }, []);
+  const markLocalSessionFromState = useCallback(() => {
+    if (!activeCompetitionId) return;
+    const comp = competitions.find((c) => c.id === activeCompetitionId);
+    if (!comp) return;
+    markLocalSessionFingerprint({
+      currentLifterId: comp.currentLifterId,
+      currentLift: comp.currentLift,
+      currentAttemptIndex: comp.currentAttemptIndex,
+      competitionStarted: comp.competitionStarted,
+      includeCollars: comp.includeCollars,
+      timerPhase: comp.timerPhase,
+      timerEndsAt: comp.timerEndsAt,
+      competitionMode: comp.competitionMode,
+      activeCompetitionGroupName: comp.activeCompetitionGroupName,
+      nextAttemptQueue: comp.nextAttemptQueue,
+      manualOrderByStage: comp.manualOrderByStage ?? {},
+      lifters,
+      groups,
+    });
+  }, [activeCompetitionId, competitions, lifters, groups, markLocalSessionFingerprint]);
 
   const { onCompetitionsLoaded, onRefereeSignalsChanged, onDevicesChanged, onCompetitionSessionFromDb } =
     callbacks;
@@ -480,19 +498,14 @@ export function useSupabaseSync(
     compSaveRef.current = setTimeout(async () => {
       compSaveRef.current = null;
       try {
-        muteRemoteSessionFetch();
         await dbCompetitions.upsert(competitionToDb(comp));
         lastSavedCompRef.current = serialized;
+        markLocalSessionFromState();
       } catch (error) {
         console.error("[Powerlifting:SessionSync] competition save failed", { activeCompetitionId, error });
       }
     }, LIFTER_SAVE_DEBOUNCE_MS);
-  }, [
-    readOnly,
-    activeCompetitionId,
-    competitions,
-    muteRemoteSessionFetch,
-  ]);
+  }, [readOnly, activeCompetitionId, competitions, markLocalSessionFromState]);
 
   useEffect(() => {
     if (readOnly || !isSupabaseConfigured || !dbReadyRef.current || !activeCompetitionId) return;
@@ -512,7 +525,6 @@ export function useSupabaseSync(
           lastSavedLiftersRef.current = serialized;
           return;
         }
-        muteRemoteSessionFetch();
         if (changed.length > 0) {
           await dbLifters.upsertMany(activeCompetitionId, changed);
         }
@@ -520,11 +532,12 @@ export function useSupabaseSync(
           await dbLifters.deleteByIds(activeCompetitionId, removedIds);
         }
         lastSavedLiftersRef.current = serialized;
+        markLocalSessionFromState();
       } catch (error) {
         console.error("[Powerlifting:SessionSync] lifters save failed", { activeCompetitionId, error });
       }
     }, LIFTER_SAVE_DEBOUNCE_MS);
-  }, [readOnly, activeCompetitionId, lifters, muteRemoteSessionFetch]);
+  }, [readOnly, activeCompetitionId, lifters, markLocalSessionFromState]);
 
   useEffect(() => {
     if (readOnly || !isSupabaseConfigured || !dbReadyRef.current || !activeCompetitionId) return;
@@ -544,7 +557,6 @@ export function useSupabaseSync(
           lastSavedGroupsRef.current = serialized;
           return;
         }
-        muteRemoteSessionFetch();
         if (changed.length > 0) {
           await dbGroups.upsertMany(activeCompetitionId, changed);
         }
@@ -552,11 +564,12 @@ export function useSupabaseSync(
           await dbGroups.deleteByIds(activeCompetitionId, removedIds);
         }
         lastSavedGroupsRef.current = serialized;
+        markLocalSessionFromState();
       } catch (error) {
         console.error("[Powerlifting:SessionSync] groups save failed", { activeCompetitionId, error });
       }
     }, LIFTER_SAVE_DEBOUNCE_MS);
-  }, [readOnly, activeCompetitionId, groups, muteRemoteSessionFetch]);
+  }, [readOnly, activeCompetitionId, groups, markLocalSessionFromState]);
 
   const persistSessionSnapshot = useCallback(
     async (snapshot: SessionPersistSnapshot) => {
@@ -610,8 +623,6 @@ export function useSupabaseSync(
         const compSerialized = JSON.stringify(competitionToDb(compRecord));
         const compChanged = compSerialized !== lastSavedCompRef.current;
 
-        muteRemoteSessionFetch();
-
         const writes: Promise<void>[] = [];
         if (compChanged) {
           writes.push(dbCompetitions.upsert(competitionToDb(compRecord)));
@@ -632,24 +643,21 @@ export function useSupabaseSync(
         if (changedLifters.length > 0 || removedLifterIds.length > 0) {
           lastSavedLiftersRef.current = lifterSerialized;
         }
-        lastAppliedSessionFingerprintRef.current = sessionFingerprint(
-          {
-            currentLifterId: snapshot.currentLifterId,
-            currentLift: snapshot.currentLift,
-            currentAttemptIndex: snapshot.currentAttemptIndex,
-            competitionStarted: snapshot.competitionStarted,
-            includeCollars: snapshot.includeCollars,
-            timerPhase: snapshot.timerPhase,
-            timerEndsAt: snapshot.timerEndsAt,
-            competitionMode: snapshot.competitionMode,
-            activeCompetitionGroupName: snapshot.activeCompetitionGroupName,
-            nextAttemptQueue: snapshot.nextAttemptQueue,
-            manualOrderByStage: snapshot.manualOrderByStage,
-            lifters: snapshot.lifters,
-            groups: snapshot.groups,
-          },
-          activeCompetitionId,
-        );
+        markLocalSessionFingerprint({
+          currentLifterId: snapshot.currentLifterId,
+          currentLift: snapshot.currentLift,
+          currentAttemptIndex: snapshot.currentAttemptIndex,
+          competitionStarted: snapshot.competitionStarted,
+          includeCollars: snapshot.includeCollars,
+          timerPhase: snapshot.timerPhase,
+          timerEndsAt: snapshot.timerEndsAt,
+          competitionMode: snapshot.competitionMode,
+          activeCompetitionGroupName: snapshot.activeCompetitionGroupName,
+          nextAttemptQueue: snapshot.nextAttemptQueue,
+          manualOrderByStage: snapshot.manualOrderByStage,
+          lifters: snapshot.lifters,
+          groups: snapshot.groups,
+        });
       } catch (error) {
         console.error("[Powerlifting:SessionSync] immediate persist failed", {
           activeCompetitionId,
@@ -658,7 +666,7 @@ export function useSupabaseSync(
         });
       }
     },
-    [readOnly, activeCompetitionId, competitions, muteRemoteSessionFetch],
+    [readOnly, activeCompetitionId, competitions, markLocalSessionFingerprint],
   );
 
   useEffect(() => {
@@ -834,15 +842,9 @@ export function useSupabaseSync(
     };
 
     const scheduleSessionRefetch = (reason: string) => {
-      if (shouldMuteRemoteSessionFetch()) {
-        return;
-      }
       if (sessionRefetchTimer) clearTimeout(sessionRefetchTimer);
       sessionRefetchTimer = setTimeout(() => {
         sessionRefetchTimer = null;
-        if (shouldMuteRemoteSessionFetch()) {
-          return;
-        }
         void fetchAndApplySession(reason);
       }, SESSION_REFETCH_DEBOUNCE_MS);
     };
@@ -897,6 +899,42 @@ export function useSupabaseSync(
           scheduleSessionRefetch("realtime:lifters DELETE");
         },
       )
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "groups",
+          filter: `competition_id=eq.${activeCompetitionId}`,
+        },
+        () => {
+          scheduleSessionRefetch("realtime:groups INSERT");
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "groups",
+          filter: `competition_id=eq.${activeCompetitionId}`,
+        },
+        () => {
+          scheduleSessionRefetch("realtime:groups UPDATE");
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "DELETE",
+          schema: "public",
+          table: "groups",
+          filter: `competition_id=eq.${activeCompetitionId}`,
+        },
+        () => {
+          scheduleSessionRefetch("realtime:groups DELETE");
+        },
+      )
       .subscribe((status) => {
         console.log("[Powerlifting:SessionSync]", "realtime channel status", {
           competitionId: activeCompetitionId,
@@ -912,7 +950,7 @@ export function useSupabaseSync(
       if (sessionRefetchTimer) clearTimeout(sessionRefetchTimer);
       supabase.removeChannel(channel);
     };
-  }, [activeCompetitionId, readOnly, onCompetitionSessionFromDb, shouldMuteRemoteSessionFetch]);
+  }, [activeCompetitionId, readOnly, onCompetitionSessionFromDb]);
 
   useEffect(() => {
     if (!isSupabaseConfigured || !activeCompetitionId) return;

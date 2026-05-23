@@ -1225,9 +1225,32 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     if (typeof (data as { activeCompetitionId?: string | null }).activeCompetitionId !== "undefined") {
       setActiveCompetitionIdState((data as { activeCompetitionId?: string | null }).activeCompetitionId ?? null);
     }
-    // Dashboard tabs: with Supabase, platform state comes from DB realtime (avoid stale localStorage fighting Control).
-    // Display window on same machine: accept opener/tab sync so Good/No on Control updates the screen instantly.
-    const allowLocalPlatformSync = !isSupabaseConfigured || isDisplayScreenRef.current;
+    // With Supabase: ignore full competitions[] snapshots from localStorage (stale). Still accept
+    // partial platform patches from another tab (e.g. Control → Control) and all patches on display.
+    const hasCompetitionsList = Array.isArray((data as { competitions?: unknown }).competitions);
+    const hasPlatformPatch =
+      Boolean(data.lifters) ||
+      Boolean(data.groups) ||
+      typeof (data as { currentLifterId?: unknown }).currentLifterId !== "undefined" ||
+      typeof data.refereeInputLocked === "boolean" ||
+      Array.isArray((data as { refereeSignals?: unknown }).refereeSignals) ||
+      Boolean(data.currentLift) ||
+      typeof data.currentAttemptIndex === "number" ||
+      typeof data.competitionStarted === "boolean" ||
+      typeof data.includeCollars === "boolean" ||
+      Boolean(data.timerPhase) ||
+      typeof data.timerEndsAt === "number" ||
+      data.timerEndsAt === null ||
+      data.competitionMode === "FULL_GAME" ||
+      data.competitionMode === "BENCH_ONLY" ||
+      Array.isArray((data as { nextAttemptQueue?: unknown }).nextAttemptQueue) ||
+      typeof (data as { activeCompetitionGroupName?: unknown }).activeCompetitionGroupName === "string" ||
+      (data as { activeCompetitionGroupName?: unknown }).activeCompetitionGroupName === null ||
+      typeof (data as { manualOrderByStage?: unknown }).manualOrderByStage !== "undefined";
+    const allowLocalPlatformSync =
+      !isSupabaseConfigured ||
+      isDisplayScreenRef.current ||
+      (hasPlatformPatch && !hasCompetitionsList);
     if (!allowLocalPlatformSync) {
       if (typeof data.refereeInputLocked === "boolean") setRefereeInputLockedState(data.refereeInputLocked);
       return;
