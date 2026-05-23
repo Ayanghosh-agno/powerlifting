@@ -29,7 +29,7 @@ import {
 import { QRCodeSVG } from "qrcode.react";
 import type { Session, User } from "@supabase/supabase-js";
 import indiaStateDistrictData from "../node_modules/india-states-districts/state_discripts.json";
-import { useSupabaseSync, type ConnectedRefereeSlots } from "./lib/useSupabaseSync";
+import { useSupabaseSync, type ConnectedRefereeSlots, type CompetitionSessionFromDb } from "./lib/useSupabaseSync";
 import {
   type LiftType,
   type AttemptStatus,
@@ -999,30 +999,88 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
   const [, setCurrentRefereeSessionIdState] = useState<string | null>(null);
   const [currentRefreeSessionId, setCurrentRefreeSessionIdState] = useState<string | null>(null);
   const stageKeyRef = useRef<string>("");
+  const activeCompetitionIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    activeCompetitionIdRef.current = activeCompetitionId;
+  }, [activeCompetitionId]);
 
   const onCompetitionsLoaded = useCallback((loadedComps: CompetitionRecord[]) => {
     if (loadedComps.length === 0) return;
     const normalized = loadedComps.map((c) => normalizeCompetitionRecord(c));
+    const urlCid = getHashSearchParams().get("cid")?.trim() || "";
+    const prevActiveId = activeCompetitionIdRef.current;
+
+    const targetId =
+      (prevActiveId && normalized.some((competition) => competition.id === prevActiveId) ? prevActiveId : null) ??
+      (urlCid && normalized.some((competition) => competition.id === urlCid) ? urlCid : null) ??
+      normalized[0]?.id ??
+      null;
+    const target = normalized.find((competition) => competition.id === targetId) ?? normalized[0];
+    if (!target) return;
+
     setCompetitionsState(normalized);
-    if (normalized.length > 0) {
-      const first = normalized[0];
-      setActiveCompetitionIdState(first.id);
-      setLiftersState(first.lifters);
-      setGroupsState(first.groups);
-      setCurrentLifterIdState(first.currentLifterId ?? first.lifters[0]?.id ?? null);
-      setRefereeSignals(first.refereeSignals);
-      setRefereeInputLockedState(first.refereeInputLocked);
-      setCurrentLiftState(first.currentLift);
-      setCurrentAttemptIndexState(first.currentAttemptIndex);
-      setCompetitionStartedState(first.competitionStarted);
-      setIncludeCollarsState(first.includeCollars);
-      setTimerPhaseState(first.timerPhase);
-      setTimerEndsAtState(first.timerEndsAt);
-      setCompetitionModeState(first.competitionMode);
-      setNextAttemptQueueState(first.nextAttemptQueue);
-      setActiveCompetitionGroupNameState(first.activeCompetitionGroupName ?? null);
-      setManualOrderByStageState(first.manualOrderByStage ?? {});
-    }
+    setActiveCompetitionIdState(target.id);
+    setLiftersState(target.lifters);
+    setGroupsState(target.groups);
+    setCurrentLifterIdState(target.currentLifterId ?? target.lifters[0]?.id ?? null);
+    setRefereeSignals([null, null, null]);
+    setRefereeInputLockedState(target.refereeInputLocked);
+    setCurrentLiftState(target.currentLift);
+    setCurrentAttemptIndexState(target.currentAttemptIndex);
+    setCompetitionStartedState(target.competitionStarted);
+    setIncludeCollarsState(target.includeCollars);
+    setTimerPhaseState(target.timerPhase);
+    setTimerEndsAtState(target.timerEndsAt);
+    setCompetitionModeState(target.competitionMode);
+    setNextAttemptQueueState(target.nextAttemptQueue);
+    setActiveCompetitionGroupNameState(target.activeCompetitionGroupName ?? null);
+    setManualOrderByStageState(target.manualOrderByStage ?? {});
+  }, []);
+
+  const onCompetitionSessionFromDb = useCallback((session: CompetitionSessionFromDb) => {
+    const normalizedLifters = session.lifters.map((l) => normalizeLifter(l));
+    const normalizedGroups = session.groups.map((g) => normalizeGroup(g));
+    const competitionId = activeCompetitionIdRef.current;
+
+    setLiftersState(normalizedLifters);
+    setGroupsState(normalizedGroups);
+    setCurrentLifterIdState(session.currentLifterId);
+    setCurrentLiftState(session.currentLift);
+    setCurrentAttemptIndexState(session.currentAttemptIndex);
+    setCompetitionStartedState(session.competitionStarted);
+    setIncludeCollarsState(session.includeCollars);
+    setTimerPhaseState(session.timerPhase);
+    setTimerEndsAtState(session.timerEndsAt);
+    setCompetitionModeState(session.competitionMode);
+    setNextAttemptQueueState(session.nextAttemptQueue);
+    setActiveCompetitionGroupNameState(session.activeCompetitionGroupName);
+    setManualOrderByStageState(session.manualOrderByStage);
+
+    if (!competitionId) return;
+
+    setCompetitionsState((prev) =>
+      prev.map((competition) =>
+        competition.id === competitionId
+          ? {
+              ...competition,
+              lifters: normalizedLifters,
+              groups: normalizedGroups,
+              currentLifterId: session.currentLifterId,
+              currentLift: session.currentLift,
+              currentAttemptIndex: session.currentAttemptIndex,
+              competitionStarted: session.competitionStarted,
+              includeCollars: session.includeCollars,
+              timerPhase: session.timerPhase,
+              timerEndsAt: session.timerEndsAt,
+              competitionMode: session.competitionMode,
+              nextAttemptQueue: session.nextAttemptQueue,
+              activeCompetitionGroupName: session.activeCompetitionGroupName,
+              manualOrderByStage: session.manualOrderByStage,
+            }
+          : competition,
+      ),
+    );
   }, []);
 
   const onRefereeSignalsChanged = useCallback((signals: RefSignal[]) => {
@@ -1050,7 +1108,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     lifters,
     groups,
     refereeSignals,
-    { onCompetitionsLoaded, onRefereeSignalsChanged, onDevicesChanged },
+    { onCompetitionsLoaded, onRefereeSignalsChanged, onDevicesChanged, onCompetitionSessionFromDb },
     deviceIdRef.current,
     isDisplayScreen,
     currentRefreeSessionId,
