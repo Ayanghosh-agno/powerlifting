@@ -375,6 +375,8 @@ const getHashSearchParams = () => {
   return new URLSearchParams(hash.slice(queryIndex + 1));
 };
 
+const getIsDisplayScreenFromHash = () => window.location.hash.startsWith("#/display/");
+
 const createEmptyCompetitionState = (): PersistedState => ({
   lifters: [],
   groups: [],
@@ -968,8 +970,20 @@ const useAuth = () => {
 
 const AppProvider = ({ children }: { children: React.ReactNode }) => {
   const { user, loading: authLoading } = useAuth();
-  const isDisplayScreen = window.location.hash.startsWith("#/display/");
-  const isDisplayScreenRef = useRef(isDisplayScreen);
+  const isDisplayScreenRef = useRef(getIsDisplayScreenFromHash());
+  const [isDisplayScreen, setIsDisplayScreen] = useState(() => getIsDisplayScreenFromHash());
+
+  useEffect(() => {
+    const syncDisplayRoute = () => {
+      const onDisplay = getIsDisplayScreenFromHash();
+      isDisplayScreenRef.current = onDisplay;
+      setIsDisplayScreen(onDisplay);
+    };
+    syncDisplayRoute();
+    window.addEventListener("hashchange", syncDisplayRoute);
+    return () => window.removeEventListener("hashchange", syncDisplayRoute);
+  }, []);
+
   /** Display may persist verdicts to Supabase; without Supabase it stays read-only. */
   const supabaseSyncReadOnly = isDisplayScreen && !isSupabaseConfigured;
   const userScopedStorageKey = `${STORAGE_KEY}.${user?.id ?? "anon"}`;
@@ -1021,8 +1035,10 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     const normalized = loadedComps.map((c) => normalizeCompetitionRecord(c));
     const urlCid = getHashSearchParams().get("cid")?.trim() || "";
     const prevActiveId = activeCompetitionIdRef.current;
+    const onDisplayRoute = getIsDisplayScreenFromHash();
 
     const targetId =
+      (onDisplayRoute && urlCid && normalized.some((competition) => competition.id === urlCid) ? urlCid : null) ??
       (prevActiveId && normalized.some((competition) => competition.id === prevActiveId) ? prevActiveId : null) ??
       (urlCid && normalized.some((competition) => competition.id === urlCid) ? urlCid : null) ??
       normalized[0]?.id ??
@@ -1259,8 +1275,14 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
       const normalizedCompetitions = parsed.competitions.map((competition) =>
         normalizeCompetitionRecord(competition),
       );
-      const defaultActiveId =
-        parsed.activeCompetitionId && normalizedCompetitions.some((competition) => competition.id === parsed.activeCompetitionId)
+      const urlCid = getHashSearchParams().get("cid")?.trim() || "";
+      const urlCidValid =
+        getIsDisplayScreenFromHash() &&
+        urlCid &&
+        normalizedCompetitions.some((competition) => competition.id === urlCid);
+      const defaultActiveId = urlCidValid
+        ? urlCid
+        : parsed.activeCompetitionId && normalizedCompetitions.some((competition) => competition.id === parsed.activeCompetitionId)
           ? parsed.activeCompetitionId
           : normalizedCompetitions[0]?.id ?? null;
 
@@ -1515,6 +1537,14 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
       ...target,
     });
   };
+
+  useEffect(() => {
+    if (!isDisplayScreen) return;
+    const requestedCid = getHashSearchParams().get("cid")?.trim() || "";
+    if (!requestedCid || requestedCid === activeCompetitionId) return;
+    if (!competitions.some((competition) => competition.id === requestedCid)) return;
+    switchCompetition(requestedCid);
+  }, [isDisplayScreen, activeCompetitionId, competitions, switchCompetition]);
 
   const updateCompetitionName = (competitionId: string, name: string) => {
     const nextName = name.trim();
@@ -6736,8 +6766,18 @@ const DisplayFullPage = () => {
     competitionMode,
     groups,
     manualOrderByStage,
+    competitions,
+    activeCompetitionId,
+    switchCompetition,
   } = useAppContext();
   const [searchParams] = useSearchParams();
+
+  useEffect(() => {
+    const requestedCompetitionId = searchParams.get("cid")?.trim() || "";
+    if (!requestedCompetitionId || requestedCompetitionId === activeCompetitionId) return;
+    if (!competitions.some((competition) => competition.id === requestedCompetitionId)) return;
+    switchCompetition(requestedCompetitionId);
+  }, [searchParams, activeCompetitionId, competitions, switchCompetition]);
   const rawLayout = searchParams.get("layout") || "signal_results_plate";
   const displayMode =
     rawLayout === "full" || rawLayout === "bar_loading"
