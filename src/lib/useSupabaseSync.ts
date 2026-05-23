@@ -239,9 +239,23 @@ function sessionFingerprint(session: CompetitionSessionFromDb, competitionId: st
   });
 }
 
-/** After applying remote session, block debounced upserts that would re-trigger Realtime. */
-const OUTBOUND_SAVE_SUPPRESS_MS = 1_500;
 const SESSION_REFETCH_DEBOUNCE_MS = 350;
+
+export type SessionPersistSnapshot = {
+  lifters: Lifter[];
+  groups: Group[];
+  currentLifterId: string | null;
+  currentLift: LiftType;
+  currentAttemptIndex: number;
+  competitionStarted: boolean;
+  includeCollars: boolean;
+  timerPhase: TimerPhase;
+  timerEndsAt: number | null;
+  competitionMode: CompetitionMode;
+  activeCompetitionGroupName: string | null;
+  nextAttemptQueue: NextAttemptEntry[];
+  manualOrderByStage: Record<string, string[]>;
+};
 
 type SyncCallbacks = {
   onCompetitionsLoaded: (competitions: CompetitionRecord[]) => void;
@@ -279,12 +293,6 @@ export function useSupabaseSync(
   const groupSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const presenceChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const lastAppliedSessionFingerprintRef = useRef<string>("");
-  const suppressOutboundSaveUntilRef = useRef(0);
-
-  const isOutboundSaveSuppressed = () => Date.now() < suppressOutboundSaveUntilRef.current;
-  const armOutboundSaveSuppress = () => {
-    suppressOutboundSaveUntilRef.current = Date.now() + OUTBOUND_SAVE_SUPPRESS_MS;
-  };
 
   const { onCompetitionsLoaded, onRefereeSignalsChanged, onDevicesChanged, onCompetitionSessionFromDb } =
     callbacks;
@@ -358,7 +366,6 @@ export function useSupabaseSync(
 
   useEffect(() => {
     if (readOnly || !isSupabaseConfigured || !dbReadyRef.current || !activeCompetitionId) return;
-    if (isOutboundSaveSuppressed()) return;
     const comp = competitions.find((c) => c.id === activeCompetitionId);
     if (!comp) return;
 
@@ -368,10 +375,10 @@ export function useSupabaseSync(
 
     if (compSaveRef.current) clearTimeout(compSaveRef.current);
     compSaveRef.current = setTimeout(async () => {
-      if (isOutboundSaveSuppressed()) return;
       try {
         await dbCompetitions.upsert(competitionToDb(comp));
-      } catch {
+      } catch (error) {
+        console.error("[Powerlifting:SessionSync] competition save failed", { activeCompetitionId, error });
       }
     }, 800);
   }, [
@@ -382,43 +389,125 @@ export function useSupabaseSync(
 
   useEffect(() => {
     if (readOnly || !isSupabaseConfigured || !dbReadyRef.current || !activeCompetitionId) return;
-    if (isOutboundSaveSuppressed()) return;
     const serialized = JSON.stringify(lifters.map((l) => lifterToDb(l, activeCompetitionId)));
     if (serialized === lastSavedLiftersRef.current) return;
     lastSavedLiftersRef.current = serialized;
 
     if (lifterSaveRef.current) clearTimeout(lifterSaveRef.current);
     lifterSaveRef.current = setTimeout(async () => {
-      if (isOutboundSaveSuppressed()) return;
       try {
         await dbLifters.upsertAll(
           activeCompetitionId,
           lifters.map((l) => lifterToDb(l, activeCompetitionId))
         );
-      } catch {
+      } catch (error) {
+        console.error("[Powerlifting:SessionSync] lifters save failed", { activeCompetitionId, error });
       }
     }, 800);
   }, [readOnly, activeCompetitionId, lifters]);
 
   useEffect(() => {
     if (readOnly || !isSupabaseConfigured || !dbReadyRef.current || !activeCompetitionId) return;
-    if (isOutboundSaveSuppressed()) return;
     const serialized = JSON.stringify(groups);
     if (serialized === lastSavedGroupsRef.current) return;
     lastSavedGroupsRef.current = serialized;
 
     if (groupSaveRef.current) clearTimeout(groupSaveRef.current);
     groupSaveRef.current = setTimeout(async () => {
-      if (isOutboundSaveSuppressed()) return;
       try {
         await dbGroups.upsertAll(
           activeCompetitionId,
           groups.map((g) => groupToDb(g, activeCompetitionId))
         );
-      } catch {
+      } catch (error) {
+        console.error("[Powerlifting:SessionSync] groups save failed", { activeCompetitionId, error });
       }
     }, 800);
   }, [readOnly, activeCompetitionId, groups]);
+
+  const persistSessionSnapshot = useCallback(
+    async (snapshot: SessionPersistSnapshot) => {
+      if (readOnly || !isSupabaseConfigured || !dbReadyRef.current || !activeCompetitionId) return;
+
+      const compMeta = competitions.find((c) => c.id === activeCompetitionId);
+      if (!compMeta) {
+        console.warn("[Powerlifting:SessionSync] persist skipped — active competition not in list", {
+          activeCompetitionId,
+        });
+        return;
+      }
+
+      if (compSaveRef.current) {
+        clearTimeout(compSaveRef.current);
+        compSaveRef.current = null;
+      }
+      if (lifterSaveRef.current) {
+        clearTimeout(lifterSaveRef.current);
+        lifterSaveRef.current = null;
+      }
+
+      const compRecord: CompetitionRecord = {
+        id: activeCompetitionId,
+        name: compMeta.name,
+        createdAt: compMeta.createdAt,
+        lifters: snapshot.lifters,
+        groups: snapshot.groups,
+        currentLifterId: snapshot.currentLifterId,
+        refereeSignals: [null, null, null],
+        refereeInputLocked: false,
+        currentLift: snapshot.currentLift,
+        currentAttemptIndex: snapshot.currentAttemptIndex,
+        competitionStarted: snapshot.competitionStarted,
+        includeCollars: snapshot.includeCollars,
+        timerPhase: snapshot.timerPhase,
+        timerEndsAt: snapshot.timerEndsAt,
+        competitionMode: snapshot.competitionMode,
+        activeCompetitionGroupName: snapshot.activeCompetitionGroupName,
+        nextAttemptQueue: snapshot.nextAttemptQueue,
+        manualOrderByStage: snapshot.manualOrderByStage,
+      };
+
+      try {
+        await Promise.all([
+          dbLifters.upsertAll(
+            activeCompetitionId,
+            snapshot.lifters.map((l) => lifterToDb(l, activeCompetitionId)),
+          ),
+          dbCompetitions.upsert(competitionToDb(compRecord)),
+        ]);
+
+        lastSavedCompRef.current = JSON.stringify(competitionToDb(compRecord));
+        lastSavedLiftersRef.current = JSON.stringify(
+          snapshot.lifters.map((l) => lifterToDb(l, activeCompetitionId)),
+        );
+        lastAppliedSessionFingerprintRef.current = sessionFingerprint(
+          {
+            currentLifterId: snapshot.currentLifterId,
+            currentLift: snapshot.currentLift,
+            currentAttemptIndex: snapshot.currentAttemptIndex,
+            competitionStarted: snapshot.competitionStarted,
+            includeCollars: snapshot.includeCollars,
+            timerPhase: snapshot.timerPhase,
+            timerEndsAt: snapshot.timerEndsAt,
+            competitionMode: snapshot.competitionMode,
+            activeCompetitionGroupName: snapshot.activeCompetitionGroupName,
+            nextAttemptQueue: snapshot.nextAttemptQueue,
+            manualOrderByStage: snapshot.manualOrderByStage,
+            lifters: snapshot.lifters,
+            groups: snapshot.groups,
+          },
+          activeCompetitionId,
+        );
+      } catch (error) {
+        console.error("[Powerlifting:SessionSync] immediate persist failed", {
+          activeCompetitionId,
+          currentLifterId: snapshot.currentLifterId,
+          error,
+        });
+      }
+    },
+    [readOnly, activeCompetitionId, competitions],
+  );
 
   useEffect(() => {
     if (!isSupabaseConfigured || !activeCompetitionId) return;
@@ -540,20 +629,6 @@ export function useSupabaseSync(
           return;
         }
 
-        // Drop stale local debounced writes so they cannot overwrite the remote session we are about to apply.
-        if (compSaveRef.current) {
-          clearTimeout(compSaveRef.current);
-          compSaveRef.current = null;
-        }
-        if (lifterSaveRef.current) {
-          clearTimeout(lifterSaveRef.current);
-          lifterSaveRef.current = null;
-        }
-        if (groupSaveRef.current) {
-          clearTimeout(groupSaveRef.current);
-          groupSaveRef.current = null;
-        }
-
         // Mark remote snapshot as saved so writers do not immediately re-upsert the same payload.
         if (!readOnly) {
           const compRecord: CompetitionRecord = {
@@ -584,7 +659,6 @@ export function useSupabaseSync(
         }
 
         lastAppliedSessionFingerprintRef.current = fingerprint;
-        armOutboundSaveSuppress();
 
         const currentName =
           session.lifters.find((l) => l.id === session.currentLifterId)?.name ?? "(unknown)";
@@ -803,6 +877,7 @@ export function useSupabaseSync(
     createCompetitionInDb,
     deleteCompetitionFromDb,
     updateCompetitionNameInDb,
+    persistSessionSnapshot,
     dbReady: dbReadyRef.current,
     trackPresence,
     untrackPresence,

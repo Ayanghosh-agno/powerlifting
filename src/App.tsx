@@ -1124,6 +1124,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     updateCompetitionNameInDb,
     trackPresence,
     untrackPresence,
+    persistSessionSnapshot,
   } = useSupabaseSync(
     activeCompetitionId,
     competitions,
@@ -1796,17 +1797,20 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
       }
     }
 
+    const normalizedQueue = sortNextAttemptQueue(
+      [...queueAfter, ...derivePendingNextAttemptQueue(sessionLifters, competitionMode)],
+      updated,
+      competitionMode,
+    );
+    const nextTimerPhase: TimerPhase = normalizedQueue.length > 0 ? "NEXT_ATTEMPT" : "IDLE";
+    const nextTimerEndsAt = normalizedQueue.length > 0 ? Date.now() + ONE_MINUTE_MS : null;
+
     setLifters(updated);
     setCurrentLift(nextLift);
     setCurrentAttemptIndex(nextAttemptIdx);
     if (nextLifterId !== currentLifterId) {
       setCurrentLifterId(nextLifterId);
     }
-    const normalizedQueue = sortNextAttemptQueue(
-      [...queueAfter, ...derivePendingNextAttemptQueue(sessionLifters, competitionMode)],
-      updated,
-      competitionMode,
-    );
     if (JSON.stringify(normalizedQueue) !== JSON.stringify(nextAttemptQueue)) {
       setNextAttemptQueueState(normalizedQueue);
       broadcast({ nextAttemptQueue: normalizedQueue });
@@ -1817,6 +1821,25 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     } else {
       clearTimerState();
     }
+
+    if (isSupabaseConfigured && !supabaseSyncReadOnly) {
+      void persistSessionSnapshot({
+        lifters: updated.map((l) => normalizeLifter(l)),
+        groups,
+        currentLifterId: nextLifterId,
+        currentLift: nextLift,
+        currentAttemptIndex: nextAttemptIdx,
+        competitionStarted,
+        includeCollars,
+        timerPhase: nextTimerPhase,
+        timerEndsAt: nextTimerEndsAt,
+        competitionMode,
+        activeCompetitionGroupName,
+        nextAttemptQueue: normalizedQueue,
+        manualOrderByStage,
+      });
+    }
+
     // Reset immediately after verdict so next lifter starts with a clean signal slate.
     // The display screen keeps its own local overlay state, so this won't interrupt animations.
     resetSignals();
@@ -1839,6 +1862,12 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     startNextAttemptClock,
     clearTimerState,
     resetSignals,
+    persistSessionSnapshot,
+    groups,
+    competitionStarted,
+    includeCollars,
+    activeCompetitionGroupName,
+    supabaseSyncReadOnly,
   ]);
 
   useEffect(() => {
