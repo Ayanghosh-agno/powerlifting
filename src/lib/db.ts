@@ -85,6 +85,12 @@ export const dbCompetitions = {
     return data ?? [];
   },
 
+  async getById(id: string): Promise<DbCompetition | null> {
+    const { data, error } = await supabase.from("competitions").select("*").eq("id", id).maybeSingle();
+    if (error) throw error;
+    return data;
+  },
+
   async create(comp: Omit<DbCompetition, "created_at" | "updated_at">): Promise<DbCompetition> {
     const { data, error } = await supabase
       .from("competitions")

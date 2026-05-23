@@ -29,7 +29,7 @@ import {
 import { QRCodeSVG } from "qrcode.react";
 import type { Session, User } from "@supabase/supabase-js";
 import indiaStateDistrictData from "../node_modules/india-states-districts/state_discripts.json";
-import { useSupabaseSync, type ConnectedRefereeSlots } from "./lib/useSupabaseSync";
+import { useSupabaseSync, type ConnectedRefereeSlots, type CompetitionSessionFromDb } from "./lib/useSupabaseSync";
 import {
   type LiftType,
   type AttemptStatus,
@@ -124,6 +124,15 @@ const RESULT_OVERLAY_DISPLAY_MS = 4000;
 const BAR_WEIGHT_KG = 20;
 const COLLAR_PER_SIDE_KG = 2.5;
 const COLLAR_PAIR_KG = COLLAR_PER_SIDE_KG * 2;
+
+const LOG_CONTROL = "[Powerlifting:Control]";
+const LOG_SESSION = "[Powerlifting:SessionSync]";
+
+function formatLifterRef(lifterId: string | null, lifters: { id: string; name: string }[]) {
+  if (!lifterId) return null;
+  const lifter = lifters.find((row) => row.id === lifterId);
+  return lifter ? { id: lifterId, name: lifter.name } : { id: lifterId, name: "(not in lifters list)" };
+}
 
 /** Unified typography for scoreboard results tables, flight line, and related strips on the display screen */
 const DISPLAY_RESULTS_BODY = "text-sm leading-snug";
@@ -961,6 +970,8 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
   const { user, loading: authLoading } = useAuth();
   const isDisplayScreen = window.location.hash.startsWith("#/display/");
   const isDisplayScreenRef = useRef(isDisplayScreen);
+  /** Display may persist verdicts to Supabase; without Supabase it stays read-only. */
+  const supabaseSyncReadOnly = isDisplayScreen && !isSupabaseConfigured;
   const userScopedStorageKey = `${STORAGE_KEY}.${user?.id ?? "anon"}`;
 
   useEffect(() => {
@@ -999,35 +1010,104 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
   const [, setCurrentRefereeSessionIdState] = useState<string | null>(null);
   const [currentRefreeSessionId, setCurrentRefreeSessionIdState] = useState<string | null>(null);
   const stageKeyRef = useRef<string>("");
+  const activeCompetitionIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    activeCompetitionIdRef.current = activeCompetitionId;
+  }, [activeCompetitionId]);
 
   const onCompetitionsLoaded = useCallback((loadedComps: CompetitionRecord[]) => {
     if (loadedComps.length === 0) return;
     const normalized = loadedComps.map((c) => normalizeCompetitionRecord(c));
+    const urlCid = getHashSearchParams().get("cid")?.trim() || "";
+    const prevActiveId = activeCompetitionIdRef.current;
+
+    const targetId =
+      (prevActiveId && normalized.some((competition) => competition.id === prevActiveId) ? prevActiveId : null) ??
+      (urlCid && normalized.some((competition) => competition.id === urlCid) ? urlCid : null) ??
+      normalized[0]?.id ??
+      null;
+    const target = normalized.find((competition) => competition.id === targetId) ?? normalized[0];
+    if (!target) return;
+
     setCompetitionsState(normalized);
-    if (normalized.length > 0) {
-      const first = normalized[0];
-      setActiveCompetitionIdState(first.id);
-      setLiftersState(first.lifters);
-      setGroupsState(first.groups);
-      setCurrentLifterIdState(first.currentLifterId ?? first.lifters[0]?.id ?? null);
-      setRefereeSignals(first.refereeSignals);
-      setRefereeInputLockedState(first.refereeInputLocked);
-      setCurrentLiftState(first.currentLift);
-      setCurrentAttemptIndexState(first.currentAttemptIndex);
-      setCompetitionStartedState(first.competitionStarted);
-      setIncludeCollarsState(first.includeCollars);
-      setTimerPhaseState(first.timerPhase);
-      setTimerEndsAtState(first.timerEndsAt);
-      setCompetitionModeState(first.competitionMode);
-      setNextAttemptQueueState(first.nextAttemptQueue);
-      setActiveCompetitionGroupNameState(first.activeCompetitionGroupName ?? null);
-      setManualOrderByStageState(first.manualOrderByStage ?? {});
-    }
+    setActiveCompetitionIdState(target.id);
+    setLiftersState(target.lifters);
+    setGroupsState(target.groups);
+    setCurrentLifterIdState(target.currentLifterId ?? target.lifters[0]?.id ?? null);
+    setRefereeSignals([null, null, null]);
+    setRefereeInputLockedState(target.refereeInputLocked);
+    setCurrentLiftState(target.currentLift);
+    setCurrentAttemptIndexState(target.currentAttemptIndex);
+    setCompetitionStartedState(target.competitionStarted);
+    setIncludeCollarsState(target.includeCollars);
+    setTimerPhaseState(target.timerPhase);
+    setTimerEndsAtState(target.timerEndsAt);
+    setCompetitionModeState(target.competitionMode);
+    setNextAttemptQueueState(target.nextAttemptQueue);
+    setActiveCompetitionGroupNameState(target.activeCompetitionGroupName ?? null);
+    setManualOrderByStageState(target.manualOrderByStage ?? {});
+    console.log(LOG_SESSION, "initial competitions loaded from DB", {
+      competitionCount: normalized.length,
+      activeCompetitionId: target.id,
+      activeName: target.name,
+      currentLifter: formatLifterRef(target.currentLifterId ?? null, target.lifters),
+    });
+  }, []);
+
+  const onCompetitionSessionFromDb = useCallback((session: CompetitionSessionFromDb) => {
+    const normalizedLifters = session.lifters.map((l) => normalizeLifter(l));
+    const normalizedGroups = session.groups.map((g) => normalizeGroup(g));
+    const competitionId = activeCompetitionIdRef.current;
+
+    setLiftersState(normalizedLifters);
+    setGroupsState(normalizedGroups);
+    setCurrentLifterIdState(session.currentLifterId);
+    setCurrentLiftState(session.currentLift);
+    setCurrentAttemptIndexState(session.currentAttemptIndex);
+    setCompetitionStartedState(session.competitionStarted);
+    setIncludeCollarsState(session.includeCollars);
+    setTimerPhaseState(session.timerPhase);
+    setTimerEndsAtState(session.timerEndsAt);
+    setCompetitionModeState(session.competitionMode);
+    setNextAttemptQueueState(session.nextAttemptQueue);
+    setActiveCompetitionGroupNameState(session.activeCompetitionGroupName);
+    setManualOrderByStageState(session.manualOrderByStage);
+
+    if (!competitionId) return;
+
+    setCompetitionsState((prev) =>
+      prev.map((competition) =>
+        competition.id === competitionId
+          ? {
+              ...competition,
+              lifters: normalizedLifters,
+              groups: normalizedGroups,
+              currentLifterId: session.currentLifterId,
+              currentLift: session.currentLift,
+              currentAttemptIndex: session.currentAttemptIndex,
+              competitionStarted: session.competitionStarted,
+              includeCollars: session.includeCollars,
+              timerPhase: session.timerPhase,
+              timerEndsAt: session.timerEndsAt,
+              competitionMode: session.competitionMode,
+              nextAttemptQueue: session.nextAttemptQueue,
+              activeCompetitionGroupName: session.activeCompetitionGroupName,
+              manualOrderByStage: session.manualOrderByStage,
+            }
+          : competition,
+      ),
+    );
   }, []);
 
   const onRefereeSignalsChanged = useCallback((signals: RefSignal[]) => {
     setRefereeSignals(signals);
     if (!isDisplayScreenRef.current) {
+      console.log(LOG_CONTROL, "referee signals from DB realtime", {
+        competitionId: activeCompetitionIdRef.current,
+        signals: { left: signals[0], center: signals[1], right: signals[2] },
+        receivedCount: signals.filter((s) => s !== null).length,
+      });
       socket.emit("SYNC_STATE", { refereeSignals: signals });
     }
   }, []);
@@ -1050,9 +1130,9 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     lifters,
     groups,
     refereeSignals,
-    { onCompetitionsLoaded, onRefereeSignalsChanged, onDevicesChanged },
+    { onCompetitionsLoaded, onRefereeSignalsChanged, onDevicesChanged, onCompetitionSessionFromDb },
     deviceIdRef.current,
-    isDisplayScreen,
+    supabaseSyncReadOnly,
     currentRefreeSessionId,
     authLoading,
     user?.id ?? null,
@@ -1128,6 +1208,11 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     if (typeof (data as { activeCompetitionId?: string | null }).activeCompetitionId !== "undefined") {
       setActiveCompetitionIdState((data as { activeCompetitionId?: string | null }).activeCompetitionId ?? null);
     }
+    // With Supabase, platform/lifter session state is authoritative from DB realtime — not tab localStorage sync.
+    if (isSupabaseConfigured) {
+      if (typeof data.refereeInputLocked === "boolean") setRefereeInputLockedState(data.refereeInputLocked);
+      return;
+    }
     if (data.lifters) setLiftersState(data.lifters.map((l) => normalizeLifter(l)));
     if (data.groups) setGroupsState(data.groups.map((g) => normalizeGroup(g)));
     if (typeof data.currentLifterId !== "undefined") setCurrentLifterIdState(data.currentLifterId);
@@ -1178,9 +1263,11 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
 
       setCompetitionsState(normalizedCompetitions);
       setActiveCompetitionIdState(defaultActiveId);
-      const activeCompetition =
-        normalizedCompetitions.find((competition) => competition.id === defaultActiveId) ?? null;
-      hydrateCompetition(activeCompetition);
+      if (!isSupabaseConfigured) {
+        const activeCompetition =
+          normalizedCompetitions.find((competition) => competition.id === defaultActiveId) ?? null;
+        hydrateCompetition(activeCompetition);
+      }
       return;
     }
 
@@ -1257,6 +1344,13 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => {
     if (!lifters.length) {
       if (currentLifterId !== null) setCurrentLifterIdState(null);
+      return;
+    }
+    if (isSupabaseConfigured) {
+      // Trust DB session sync for current lifter; only clear if the lifter was removed.
+      if (currentLifterId && !lifters.some((l) => l.id === currentLifterId)) {
+        setCurrentLifterIdState(null);
+      }
       return;
     }
     const pool =
@@ -1402,6 +1496,16 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     const target = competitions.find((competition) => competition.id === competitionId);
     if (!target) return;
     setActiveCompetitionIdState(target.id);
+    if (isSupabaseConfigured) {
+      // Session channel refetches from DB; avoid hydrating stale localStorage snapshot.
+      console.log(LOG_CONTROL, "switch competition (Supabase — waiting for session refetch)", {
+        competitionId: target.id,
+        name: target.name,
+        cachedCurrentLifter: formatLifterRef(target.currentLifterId ?? null, target.lifters),
+      });
+      broadcast({ activeCompetitionId: target.id });
+      return;
+    }
     hydrateCompetition(target);
     broadcast({
       activeCompetitionId: target.id,
@@ -2352,7 +2456,11 @@ const CompetitionPage = () => {
 };
 
 const ControlPage = () => {
+  const [searchParams] = useSearchParams();
   const {
+    competitions,
+    activeCompetitionId,
+    switchCompetition,
     lifters,
     setLifters,
     groups,
@@ -2378,7 +2486,37 @@ const ControlPage = () => {
     updateAttemptForLifter,
     applyRefereeDecision,
     resetSignals,
+    refereeSignals,
   } = useAppContext();
+
+  const controlDebugMountedRef = useRef(false);
+
+  useEffect(() => {
+    if (controlDebugMountedRef.current) return;
+    controlDebugMountedRef.current = true;
+    console.log(LOG_CONTROL, "Control Center mounted", {
+      activeCompetitionId,
+      urlCid: searchParams.get("cid")?.trim() || null,
+      supabase: isSupabaseConfigured,
+      competitionNames: competitions.map((c) => ({ id: c.id, name: c.name, isActive: c.id === activeCompetitionId })),
+    });
+  }, [activeCompetitionId, competitions, searchParams]);
+
+  useEffect(() => {
+    const requestedCompetitionId = searchParams.get("cid")?.trim() || "";
+    if (requestedCompetitionId && requestedCompetitionId !== activeCompetitionId) {
+      const exists = competitions.some((competition) => competition.id === requestedCompetitionId);
+      console.log(LOG_CONTROL, "URL cid param", {
+        requestedCompetitionId,
+        activeCompetitionId,
+        existsInList: exists,
+        willSwitch: exists,
+      });
+      if (exists) {
+        switchCompetition(requestedCompetitionId);
+      }
+    }
+  }, [searchParams, activeCompetitionId, competitions, switchCompetition]);
 
   const sessionLifters = useMemo(
     () =>
@@ -2485,6 +2623,54 @@ const ControlPage = () => {
 
   const currentLifter = lifters.find((l) => l.id === currentLifterId) ?? null;
 
+  const controlPlatformSnapshotRef = useRef("");
+  useEffect(() => {
+    const attempt = currentLifter
+      ? getAttempts(currentLifter, currentLift)[currentAttemptIndex]
+      : null;
+    const snapshot = JSON.stringify({
+      activeCompetitionId,
+      currentLifterId,
+      currentLift,
+      currentAttemptIndex,
+      attemptStatus: attempt?.status ?? null,
+      lifterName: currentLifter?.name ?? null,
+    });
+    if (snapshot === controlPlatformSnapshotRef.current) return;
+    controlPlatformSnapshotRef.current = snapshot;
+    console.log(LOG_CONTROL, "platform UI state changed", {
+      activeCompetitionId,
+      currentLifter: formatLifterRef(currentLifterId, lifters),
+      currentLift,
+      attempt: currentAttemptIndex + 1,
+      attemptStatus: attempt?.status ?? "n/a",
+      activeGroup: activeCompetitionGroupName,
+      sessionLifterCount: sessionLifters.length,
+    });
+  }, [
+    activeCompetitionId,
+    currentLifterId,
+    currentLifter,
+    currentLift,
+    currentAttemptIndex,
+    lifters,
+    activeCompetitionGroupName,
+    sessionLifters.length,
+  ]);
+
+  const controlSignalsSnapshotRef = useRef("");
+  useEffect(() => {
+    const snapshot = JSON.stringify(refereeSignals);
+    if (snapshot === controlSignalsSnapshotRef.current) return;
+    controlSignalsSnapshotRef.current = snapshot;
+    console.log(LOG_CONTROL, "referee signals in React state", {
+      left: refereeSignals[0],
+      center: refereeSignals[1],
+      right: refereeSignals[2],
+      allIn: refereeSignals.every((s) => s !== null),
+    });
+  }, [refereeSignals]);
+
   useEffect(() => {
     if (activeCompetitionGroupName) return;
     if (!currentLifter) return;
@@ -2514,7 +2700,9 @@ const ControlPage = () => {
     setActionNotice(`Group stage applied: ${targetLift.toUpperCase()} A${targetAttemptIndex + 1}`);
   }, [activeCompetitionGroupName, competitionMode, currentLifter, currentLift, groups, lifters, setCurrentAttemptIndex, setCurrentLift]);
 
+  // Offline-only: auto-advance to first incomplete lifter in the round. With Supabase, current lifter comes from DB realtime.
   useEffect(() => {
+    if (isSupabaseConfigured) return;
     if (timerPhase === "NEXT_ATTEMPT") return;
     if (!activeStageLifters.length) return;
 
@@ -6486,6 +6674,7 @@ const DisplayFullPage = () => {
     setCurrentLifterId,
     refereeSignals,
     resetSignals,
+    applyRefereeDecision,
     currentLift,
     currentAttemptIndex,
     competitionStarted,
@@ -6519,6 +6708,27 @@ const DisplayFullPage = () => {
   const overlayHideTimeoutRef = useRef<number | null>(null);
   const overlayPhaseTimeoutRef = useRef<number | null>(null);
   const prevLiveRefereeCountRef = useRef(-1);
+  const displayVerdictFingerprintRef = useRef<string | null>(null);
+
+  // With Supabase: display records the official verdict (Control only drives platform via DB realtime).
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    if (!refereeSignals.every((signal) => signal !== null)) {
+      displayVerdictFingerprintRef.current = null;
+      return;
+    }
+    if (!currentLifterId) return;
+
+    const fingerprint = `${currentLifterId}|${currentLift}|${currentAttemptIndex}|${JSON.stringify(refereeSignals)}`;
+    if (displayVerdictFingerprintRef.current === fingerprint) return;
+
+    const timer = window.setTimeout(() => {
+      displayVerdictFingerprintRef.current = fingerprint;
+      applyRefereeDecision();
+    }, 240);
+
+    return () => window.clearTimeout(timer);
+  }, [refereeSignals, currentLifterId, currentLift, currentAttemptIndex, applyRefereeDecision]);
 
   const activeTheme = DISPLAY_THEME_CONFIG[displayTheme];
   const isDarkTheme = activeTheme.tone === "dark";
@@ -6665,7 +6875,10 @@ const DisplayFullPage = () => {
         setShowSignalOverlay(false);
         setDisplaySignals([null, null, null]);
 
-        resetSignals();
+        // applyRefereeDecision already clears signals when Supabase is on; keep for offline display.
+        if (!isSupabaseConfigured) {
+          resetSignals();
+        }
         setIsFinalVerdictAnimating(false);
       };
 
