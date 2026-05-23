@@ -961,6 +961,8 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
   const { user, loading: authLoading } = useAuth();
   const isDisplayScreen = window.location.hash.startsWith("#/display/");
   const isDisplayScreenRef = useRef(isDisplayScreen);
+  /** Display may persist verdicts to Supabase; without Supabase it stays read-only. */
+  const supabaseSyncReadOnly = isDisplayScreen && !isSupabaseConfigured;
   const userScopedStorageKey = `${STORAGE_KEY}.${user?.id ?? "anon"}`;
 
   useEffect(() => {
@@ -1110,7 +1112,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     refereeSignals,
     { onCompetitionsLoaded, onRefereeSignalsChanged, onDevicesChanged, onCompetitionSessionFromDb },
     deviceIdRef.current,
-    isDisplayScreen,
+    supabaseSyncReadOnly,
     currentRefreeSessionId,
     authLoading,
     user?.id ?? null,
@@ -6544,6 +6546,7 @@ const DisplayFullPage = () => {
     setCurrentLifterId,
     refereeSignals,
     resetSignals,
+    applyRefereeDecision,
     currentLift,
     currentAttemptIndex,
     competitionStarted,
@@ -6577,6 +6580,27 @@ const DisplayFullPage = () => {
   const overlayHideTimeoutRef = useRef<number | null>(null);
   const overlayPhaseTimeoutRef = useRef<number | null>(null);
   const prevLiveRefereeCountRef = useRef(-1);
+  const displayVerdictFingerprintRef = useRef<string | null>(null);
+
+  // With Supabase: display records the official verdict (Control only drives platform via DB realtime).
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    if (!refereeSignals.every((signal) => signal !== null)) {
+      displayVerdictFingerprintRef.current = null;
+      return;
+    }
+    if (!currentLifterId) return;
+
+    const fingerprint = `${currentLifterId}|${currentLift}|${currentAttemptIndex}|${JSON.stringify(refereeSignals)}`;
+    if (displayVerdictFingerprintRef.current === fingerprint) return;
+
+    const timer = window.setTimeout(() => {
+      displayVerdictFingerprintRef.current = fingerprint;
+      applyRefereeDecision();
+    }, 240);
+
+    return () => window.clearTimeout(timer);
+  }, [refereeSignals, currentLifterId, currentLift, currentAttemptIndex, applyRefereeDecision]);
 
   const activeTheme = DISPLAY_THEME_CONFIG[displayTheme];
   const isDarkTheme = activeTheme.tone === "dark";
@@ -6723,7 +6747,10 @@ const DisplayFullPage = () => {
         setShowSignalOverlay(false);
         setDisplaySignals([null, null, null]);
 
-        resetSignals();
+        // applyRefereeDecision already clears signals when Supabase is on; keep for offline display.
+        if (!isSupabaseConfigured) {
+          resetSignals();
+        }
         setIsFinalVerdictAnimating(false);
       };
 
