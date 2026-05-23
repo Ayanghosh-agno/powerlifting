@@ -683,7 +683,7 @@ export function useSupabaseSync(
     };
 
     const scheduleSessionRefetch = (reason: string) => {
-      if (sessionRefetchTimer) return;
+      if (sessionRefetchTimer) clearTimeout(sessionRefetchTimer);
       sessionRefetchTimer = setTimeout(() => {
         sessionRefetchTimer = null;
         void fetchAndApplySession(reason);

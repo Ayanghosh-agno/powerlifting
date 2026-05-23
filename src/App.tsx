@@ -1209,8 +1209,10 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     if (typeof (data as { activeCompetitionId?: string | null }).activeCompetitionId !== "undefined") {
       setActiveCompetitionIdState((data as { activeCompetitionId?: string | null }).activeCompetitionId ?? null);
     }
-    // With Supabase, platform/lifter session state is authoritative from DB realtime — not tab localStorage sync.
-    if (isSupabaseConfigured) {
+    // Dashboard tabs: with Supabase, platform state comes from DB realtime (avoid stale localStorage fighting Control).
+    // Display window on same machine: accept opener/tab sync so Good/No on Control updates the screen instantly.
+    const allowLocalPlatformSync = !isSupabaseConfigured || isDisplayScreenRef.current;
+    if (!allowLocalPlatformSync) {
       if (typeof data.refereeInputLocked === "boolean") setRefereeInputLockedState(data.refereeInputLocked);
       return;
     }
@@ -1840,6 +1842,25 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
       });
     }
 
+    // Same-machine display popup: one full snapshot so the screen updates without waiting on Realtime.
+    if (isSupabaseConfigured && !isDisplayScreen) {
+      broadcast({
+        lifters: updated.map((l) => normalizeLifter(l)),
+        groups,
+        currentLifterId: nextLifterId,
+        currentLift: nextLift,
+        currentAttemptIndex: nextAttemptIdx,
+        competitionStarted,
+        includeCollars,
+        timerPhase: nextTimerPhase,
+        timerEndsAt: nextTimerEndsAt,
+        competitionMode,
+        activeCompetitionGroupName,
+        nextAttemptQueue: normalizedQueue,
+        manualOrderByStage,
+      });
+    }
+
     // Reset immediately after verdict so next lifter starts with a clean signal slate.
     // The display screen keeps its own local overlay state, so this won't interrupt animations.
     resetSignals();
@@ -1868,6 +1889,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     includeCollars,
     activeCompetitionGroupName,
     supabaseSyncReadOnly,
+    isDisplayScreen,
   ]);
 
   useEffect(() => {
