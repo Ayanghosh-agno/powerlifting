@@ -133,16 +133,29 @@ export const dbGroups = {
     return data ?? [];
   },
 
+  async upsertMany(competitionId: string, groups: Omit<DbGroup, "created_at">[]): Promise<void> {
+    if (groups.length === 0) return;
+    const rows = groups.map((g) => ({ ...g, competition_id: competitionId }));
+    const { error } = await supabase.from("groups").upsert(rows, { onConflict: "id" });
+    if (error) throw error;
+  },
+
+  async deleteByIds(competitionId: string, ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
+    const { error } = await supabase
+      .from("groups")
+      .delete()
+      .eq("competition_id", competitionId)
+      .in("id", ids);
+    if (error) throw error;
+  },
+
   async upsertAll(competitionId: string, groups: Omit<DbGroup, "created_at">[]): Promise<void> {
     if (groups.length === 0) {
       await supabase.from("groups").delete().eq("competition_id", competitionId);
       return;
     }
-    const rows = groups.map((g) => ({ ...g, competition_id: competitionId }));
-    const { error } = await supabase
-      .from("groups")
-      .upsert(rows, { onConflict: "id" });
-    if (error) throw error;
+    await dbGroups.upsertMany(competitionId, groups);
 
     const currentIds = groups.map((g) => g.id);
     await supabase
@@ -164,20 +177,38 @@ export const dbLifters = {
     return data ?? [];
   },
 
+  /** Upsert only the provided rows (does not delete missing ids). */
+  async upsertMany(
+    competitionId: string,
+    lifters: Omit<DbLifter, "created_at" | "updated_at">[],
+  ): Promise<void> {
+    if (lifters.length === 0) return;
+    const now = new Date().toISOString();
+    const rows = lifters.map((l) => ({
+      ...l,
+      competition_id: competitionId,
+      updated_at: now,
+    }));
+    const { error } = await supabase.from("lifters").upsert(rows, { onConflict: "id" });
+    if (error) throw error;
+  },
+
+  async deleteByIds(competitionId: string, ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
+    const { error } = await supabase
+      .from("lifters")
+      .delete()
+      .eq("competition_id", competitionId)
+      .in("id", ids);
+    if (error) throw error;
+  },
+
   async upsertAll(competitionId: string, lifters: Omit<DbLifter, "created_at" | "updated_at">[]): Promise<void> {
     if (lifters.length === 0) {
       await supabase.from("lifters").delete().eq("competition_id", competitionId);
       return;
     }
-    const rows = lifters.map((l) => ({
-      ...l,
-      competition_id: competitionId,
-      updated_at: new Date().toISOString(),
-    }));
-    const { error } = await supabase
-      .from("lifters")
-      .upsert(rows, { onConflict: "id" });
-    if (error) throw error;
+    await dbLifters.upsertMany(competitionId, lifters);
 
     const currentIds = lifters.map((l) => l.id);
     await supabase

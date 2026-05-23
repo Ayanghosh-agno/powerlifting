@@ -239,7 +239,61 @@ function sessionFingerprint(session: CompetitionSessionFromDb, competitionId: st
   });
 }
 
-const SESSION_REFETCH_DEBOUNCE_MS = 350;
+const SESSION_REFETCH_DEBOUNCE_MS = 600;
+const LIFTER_SAVE_DEBOUNCE_MS = 800;
+/** Ignore our own DB writes echoing back through Realtime for this long. */
+const REMOTE_FETCH_MUTE_MS = 2000;
+
+type DbLifterRow = ReturnType<typeof lifterToDb>;
+type DbGroupRow = ReturnType<typeof groupToDb>;
+
+function serializeLifters(lifters: Lifter[], competitionId: string) {
+  return JSON.stringify(lifters.map((l) => lifterToDb(l, competitionId)));
+}
+
+function serializeGroups(groups: Group[]) {
+  return JSON.stringify(groups);
+}
+
+function diffLifterRows(
+  previousSerialized: string,
+  lifters: Lifter[],
+  competitionId: string,
+): { changed: DbLifterRow[]; removedIds: string[] } {
+  const previous: DbLifterRow[] = previousSerialized ? JSON.parse(previousSerialized) : [];
+  const previousById = new Map(previous.map((row) => [row.id, JSON.stringify(row)]));
+  const changed: DbLifterRow[] = [];
+  const currentIds = new Set<string>();
+
+  for (const lifter of lifters) {
+    currentIds.add(lifter.id);
+    const row = lifterToDb(lifter, competitionId);
+    if (previousById.get(lifter.id) !== JSON.stringify(row)) {
+      changed.push(row);
+    }
+  }
+
+  const removedIds = previous.filter((row) => !currentIds.has(row.id)).map((row) => row.id);
+  return { changed, removedIds };
+}
+
+function diffGroupRows(previousSerialized: string, groups: Group[], competitionId: string) {
+  const previous: DbGroupRow[] = previousSerialized ? JSON.parse(previousSerialized) : [];
+  const previousById = new Map(previous.map((row) => [row.id, JSON.stringify(row)]));
+  const changed: DbGroupRow[] = [];
+  const currentIds = new Set<string>();
+
+  for (const group of groups) {
+    currentIds.add(group.id);
+    const row = groupToDb(group, competitionId);
+    if (previousById.get(group.id) !== JSON.stringify(row)) {
+      changed.push(row);
+    }
+  }
+
+  const removedIds = previous.filter((row) => !currentIds.has(row.id)).map((row) => row.id);
+  return { changed, removedIds };
+}
 
 export type SessionPersistSnapshot = {
   lifters: Lifter[];
@@ -293,6 +347,16 @@ export function useSupabaseSync(
   const groupSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const presenceChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const lastAppliedSessionFingerprintRef = useRef<string>("");
+  const remoteSessionFetchMutedUntilRef = useRef(0);
+  const sessionRefsSeededRef = useRef(false);
+
+  const muteRemoteSessionFetch = useCallback((durationMs = REMOTE_FETCH_MUTE_MS) => {
+    remoteSessionFetchMutedUntilRef.current = Date.now() + durationMs;
+  }, []);
+
+  const shouldMuteRemoteSessionFetch = useCallback(() => {
+    return Date.now() < remoteSessionFetchMutedUntilRef.current;
+  }, []);
 
   const { onCompetitionsLoaded, onRefereeSignalsChanged, onDevicesChanged, onCompetitionSessionFromDb } =
     callbacks;
@@ -365,65 +429,134 @@ export function useSupabaseSync(
   }, [authLoading, authUserId]);
 
   useEffect(() => {
+    lastSavedCompRef.current = "";
+    lastSavedLiftersRef.current = "";
+    lastSavedGroupsRef.current = "";
+    sessionRefsSeededRef.current = false;
+  }, [activeCompetitionId]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !dbReadyRef.current || !activeCompetitionId) return;
+    if (sessionRefsSeededRef.current) return;
+    const comp = competitions.find((c) => c.id === activeCompetitionId);
+    if (!comp) return;
+    if (serializeLifters(lifters, activeCompetitionId) !== serializeLifters(comp.lifters, activeCompetitionId)) {
+      return;
+    }
+
+    lastSavedCompRef.current = JSON.stringify(competitionToDb(comp));
+    lastSavedLiftersRef.current = serializeLifters(lifters, activeCompetitionId);
+    lastSavedGroupsRef.current = serializeGroups(groups);
+    lastAppliedSessionFingerprintRef.current = sessionFingerprint(
+      {
+        currentLifterId: comp.currentLifterId,
+        currentLift: comp.currentLift,
+        currentAttemptIndex: comp.currentAttemptIndex,
+        competitionStarted: comp.competitionStarted,
+        includeCollars: comp.includeCollars,
+        timerPhase: comp.timerPhase,
+        timerEndsAt: comp.timerEndsAt,
+        competitionMode: comp.competitionMode,
+        activeCompetitionGroupName: comp.activeCompetitionGroupName,
+        nextAttemptQueue: comp.nextAttemptQueue,
+        manualOrderByStage: comp.manualOrderByStage ?? {},
+        lifters,
+        groups,
+      },
+      activeCompetitionId,
+    );
+    sessionRefsSeededRef.current = true;
+  }, [activeCompetitionId, competitions, lifters, groups]);
+
+  useEffect(() => {
     if (readOnly || !isSupabaseConfigured || !dbReadyRef.current || !activeCompetitionId) return;
     const comp = competitions.find((c) => c.id === activeCompetitionId);
     if (!comp) return;
 
     const serialized = JSON.stringify(competitionToDb(comp));
     if (serialized === lastSavedCompRef.current) return;
-    lastSavedCompRef.current = serialized;
 
     if (compSaveRef.current) clearTimeout(compSaveRef.current);
     compSaveRef.current = setTimeout(async () => {
+      compSaveRef.current = null;
       try {
+        muteRemoteSessionFetch();
         await dbCompetitions.upsert(competitionToDb(comp));
+        lastSavedCompRef.current = serialized;
       } catch (error) {
         console.error("[Powerlifting:SessionSync] competition save failed", { activeCompetitionId, error });
       }
-    }, 800);
+    }, LIFTER_SAVE_DEBOUNCE_MS);
   }, [
     readOnly,
     activeCompetitionId,
     competitions,
+    muteRemoteSessionFetch,
   ]);
 
   useEffect(() => {
     if (readOnly || !isSupabaseConfigured || !dbReadyRef.current || !activeCompetitionId) return;
-    const serialized = JSON.stringify(lifters.map((l) => lifterToDb(l, activeCompetitionId)));
+    const serialized = serializeLifters(lifters, activeCompetitionId);
     if (serialized === lastSavedLiftersRef.current) return;
-    lastSavedLiftersRef.current = serialized;
 
     if (lifterSaveRef.current) clearTimeout(lifterSaveRef.current);
     lifterSaveRef.current = setTimeout(async () => {
+      lifterSaveRef.current = null;
       try {
-        await dbLifters.upsertAll(
+        const { changed, removedIds } = diffLifterRows(
+          lastSavedLiftersRef.current,
+          lifters,
           activeCompetitionId,
-          lifters.map((l) => lifterToDb(l, activeCompetitionId))
         );
+        if (changed.length === 0 && removedIds.length === 0) {
+          lastSavedLiftersRef.current = serialized;
+          return;
+        }
+        muteRemoteSessionFetch();
+        if (changed.length > 0) {
+          await dbLifters.upsertMany(activeCompetitionId, changed);
+        }
+        if (removedIds.length > 0) {
+          await dbLifters.deleteByIds(activeCompetitionId, removedIds);
+        }
+        lastSavedLiftersRef.current = serialized;
       } catch (error) {
         console.error("[Powerlifting:SessionSync] lifters save failed", { activeCompetitionId, error });
       }
-    }, 800);
-  }, [readOnly, activeCompetitionId, lifters]);
+    }, LIFTER_SAVE_DEBOUNCE_MS);
+  }, [readOnly, activeCompetitionId, lifters, muteRemoteSessionFetch]);
 
   useEffect(() => {
     if (readOnly || !isSupabaseConfigured || !dbReadyRef.current || !activeCompetitionId) return;
-    const serialized = JSON.stringify(groups);
+    const serialized = serializeGroups(groups);
     if (serialized === lastSavedGroupsRef.current) return;
-    lastSavedGroupsRef.current = serialized;
 
     if (groupSaveRef.current) clearTimeout(groupSaveRef.current);
     groupSaveRef.current = setTimeout(async () => {
+      groupSaveRef.current = null;
       try {
-        await dbGroups.upsertAll(
+        const { changed, removedIds } = diffGroupRows(
+          lastSavedGroupsRef.current,
+          groups,
           activeCompetitionId,
-          groups.map((g) => groupToDb(g, activeCompetitionId))
         );
+        if (changed.length === 0 && removedIds.length === 0) {
+          lastSavedGroupsRef.current = serialized;
+          return;
+        }
+        muteRemoteSessionFetch();
+        if (changed.length > 0) {
+          await dbGroups.upsertMany(activeCompetitionId, changed);
+        }
+        if (removedIds.length > 0) {
+          await dbGroups.deleteByIds(activeCompetitionId, removedIds);
+        }
+        lastSavedGroupsRef.current = serialized;
       } catch (error) {
         console.error("[Powerlifting:SessionSync] groups save failed", { activeCompetitionId, error });
       }
-    }, 800);
-  }, [readOnly, activeCompetitionId, groups]);
+    }, LIFTER_SAVE_DEBOUNCE_MS);
+  }, [readOnly, activeCompetitionId, groups, muteRemoteSessionFetch]);
 
   const persistSessionSnapshot = useCallback(
     async (snapshot: SessionPersistSnapshot) => {
@@ -468,18 +601,37 @@ export function useSupabaseSync(
       };
 
       try {
-        await Promise.all([
-          dbLifters.upsertAll(
-            activeCompetitionId,
-            snapshot.lifters.map((l) => lifterToDb(l, activeCompetitionId)),
-          ),
-          dbCompetitions.upsert(competitionToDb(compRecord)),
-        ]);
-
-        lastSavedCompRef.current = JSON.stringify(competitionToDb(compRecord));
-        lastSavedLiftersRef.current = JSON.stringify(
-          snapshot.lifters.map((l) => lifterToDb(l, activeCompetitionId)),
+        const lifterSerialized = serializeLifters(snapshot.lifters, activeCompetitionId);
+        const { changed: changedLifters, removedIds: removedLifterIds } = diffLifterRows(
+          lastSavedLiftersRef.current,
+          snapshot.lifters,
+          activeCompetitionId,
         );
+        const compSerialized = JSON.stringify(competitionToDb(compRecord));
+        const compChanged = compSerialized !== lastSavedCompRef.current;
+
+        muteRemoteSessionFetch();
+
+        const writes: Promise<void>[] = [];
+        if (compChanged) {
+          writes.push(dbCompetitions.upsert(competitionToDb(compRecord)));
+        }
+        if (changedLifters.length > 0) {
+          writes.push(dbLifters.upsertMany(activeCompetitionId, changedLifters));
+        }
+        if (removedLifterIds.length > 0) {
+          writes.push(dbLifters.deleteByIds(activeCompetitionId, removedLifterIds));
+        }
+        if (writes.length > 0) {
+          await Promise.all(writes);
+        }
+
+        if (compChanged) {
+          lastSavedCompRef.current = compSerialized;
+        }
+        if (changedLifters.length > 0 || removedLifterIds.length > 0) {
+          lastSavedLiftersRef.current = lifterSerialized;
+        }
         lastAppliedSessionFingerprintRef.current = sessionFingerprint(
           {
             currentLifterId: snapshot.currentLifterId,
@@ -506,7 +658,7 @@ export function useSupabaseSync(
         });
       }
     },
-    [readOnly, activeCompetitionId, competitions],
+    [readOnly, activeCompetitionId, competitions, muteRemoteSessionFetch],
   );
 
   useEffect(() => {
@@ -652,10 +804,9 @@ export function useSupabaseSync(
             manualOrderByStage: session.manualOrderByStage,
           };
           lastSavedCompRef.current = JSON.stringify(competitionToDb(compRecord));
-          lastSavedLiftersRef.current = JSON.stringify(
-            session.lifters.map((l) => lifterToDb(l, activeCompetitionId)),
-          );
-          lastSavedGroupsRef.current = JSON.stringify(session.groups);
+          lastSavedLiftersRef.current = serializeLifters(session.lifters, activeCompetitionId);
+          lastSavedGroupsRef.current = serializeGroups(session.groups);
+          sessionRefsSeededRef.current = true;
         }
 
         lastAppliedSessionFingerprintRef.current = fingerprint;
@@ -683,9 +834,15 @@ export function useSupabaseSync(
     };
 
     const scheduleSessionRefetch = (reason: string) => {
+      if (shouldMuteRemoteSessionFetch()) {
+        return;
+      }
       if (sessionRefetchTimer) clearTimeout(sessionRefetchTimer);
       sessionRefetchTimer = setTimeout(() => {
         sessionRefetchTimer = null;
+        if (shouldMuteRemoteSessionFetch()) {
+          return;
+        }
         void fetchAndApplySession(reason);
       }, SESSION_REFETCH_DEBOUNCE_MS);
     };
@@ -755,7 +912,7 @@ export function useSupabaseSync(
       if (sessionRefetchTimer) clearTimeout(sessionRefetchTimer);
       supabase.removeChannel(channel);
     };
-  }, [activeCompetitionId, readOnly, onCompetitionSessionFromDb]);
+  }, [activeCompetitionId, readOnly, onCompetitionSessionFromDb, shouldMuteRemoteSessionFetch]);
 
   useEffect(() => {
     if (!isSupabaseConfigured || !activeCompetitionId) return;

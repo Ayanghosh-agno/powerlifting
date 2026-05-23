@@ -7837,6 +7837,9 @@ CREATE POLICY "referee_devices_insert" ON referee_devices FOR INSERT TO anon, au
 CREATE POLICY "referee_devices_update" ON referee_devices FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "referee_devices_delete" ON referee_devices FOR DELETE TO anon, authenticated USING (true);
 
+ALTER PUBLICATION supabase_realtime ADD TABLE competitions;
+ALTER PUBLICATION supabase_realtime ADD TABLE lifters;
+ALTER PUBLICATION supabase_realtime ADD TABLE groups;
 ALTER PUBLICATION supabase_realtime ADD TABLE referee_signals;
 ALTER PUBLICATION supabase_realtime ADD TABLE referee_devices;`;
 
