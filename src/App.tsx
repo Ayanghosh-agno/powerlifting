@@ -125,6 +125,15 @@ const BAR_WEIGHT_KG = 20;
 const COLLAR_PER_SIDE_KG = 2.5;
 const COLLAR_PAIR_KG = COLLAR_PER_SIDE_KG * 2;
 
+const LOG_CONTROL = "[Powerlifting:Control]";
+const LOG_SESSION = "[Powerlifting:SessionSync]";
+
+function formatLifterRef(lifterId: string | null, lifters: { id: string; name: string }[]) {
+  if (!lifterId) return null;
+  const lifter = lifters.find((row) => row.id === lifterId);
+  return lifter ? { id: lifterId, name: lifter.name } : { id: lifterId, name: "(not in lifters list)" };
+}
+
 /** Unified typography for scoreboard results tables, flight line, and related strips on the display screen */
 const DISPLAY_RESULTS_BODY = "text-sm leading-snug";
 
@@ -1038,6 +1047,12 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     setNextAttemptQueueState(target.nextAttemptQueue);
     setActiveCompetitionGroupNameState(target.activeCompetitionGroupName ?? null);
     setManualOrderByStageState(target.manualOrderByStage ?? {});
+    console.log(LOG_SESSION, "initial competitions loaded from DB", {
+      competitionCount: normalized.length,
+      activeCompetitionId: target.id,
+      activeName: target.name,
+      currentLifter: formatLifterRef(target.currentLifterId ?? null, target.lifters),
+    });
   }, []);
 
   const onCompetitionSessionFromDb = useCallback((session: CompetitionSessionFromDb) => {
@@ -1088,6 +1103,11 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
   const onRefereeSignalsChanged = useCallback((signals: RefSignal[]) => {
     setRefereeSignals(signals);
     if (!isDisplayScreenRef.current) {
+      console.log(LOG_CONTROL, "referee signals from DB realtime", {
+        competitionId: activeCompetitionIdRef.current,
+        signals: { left: signals[0], center: signals[1], right: signals[2] },
+        receivedCount: signals.filter((s) => s !== null).length,
+      });
       socket.emit("SYNC_STATE", { refereeSignals: signals });
     }
   }, []);
@@ -1478,6 +1498,11 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     setActiveCompetitionIdState(target.id);
     if (isSupabaseConfigured) {
       // Session channel refetches from DB; avoid hydrating stale localStorage snapshot.
+      console.log(LOG_CONTROL, "switch competition (Supabase — waiting for session refetch)", {
+        competitionId: target.id,
+        name: target.name,
+        cachedCurrentLifter: formatLifterRef(target.currentLifterId ?? null, target.lifters),
+      });
       broadcast({ activeCompetitionId: target.id });
       return;
     }
@@ -2461,12 +2486,32 @@ const ControlPage = () => {
     updateAttemptForLifter,
     applyRefereeDecision,
     resetSignals,
+    refereeSignals,
   } = useAppContext();
+
+  const controlDebugMountedRef = useRef(false);
+
+  useEffect(() => {
+    if (controlDebugMountedRef.current) return;
+    controlDebugMountedRef.current = true;
+    console.log(LOG_CONTROL, "Control Center mounted", {
+      activeCompetitionId,
+      urlCid: searchParams.get("cid")?.trim() || null,
+      supabase: isSupabaseConfigured,
+      competitionNames: competitions.map((c) => ({ id: c.id, name: c.name, isActive: c.id === activeCompetitionId })),
+    });
+  }, [activeCompetitionId, competitions, searchParams]);
 
   useEffect(() => {
     const requestedCompetitionId = searchParams.get("cid")?.trim() || "";
     if (requestedCompetitionId && requestedCompetitionId !== activeCompetitionId) {
       const exists = competitions.some((competition) => competition.id === requestedCompetitionId);
+      console.log(LOG_CONTROL, "URL cid param", {
+        requestedCompetitionId,
+        activeCompetitionId,
+        existsInList: exists,
+        willSwitch: exists,
+      });
       if (exists) {
         switchCompetition(requestedCompetitionId);
       }
@@ -2577,6 +2622,54 @@ const ControlPage = () => {
   );
 
   const currentLifter = lifters.find((l) => l.id === currentLifterId) ?? null;
+
+  const controlPlatformSnapshotRef = useRef("");
+  useEffect(() => {
+    const attempt = currentLifter
+      ? getAttempts(currentLifter, currentLift)[currentAttemptIndex]
+      : null;
+    const snapshot = JSON.stringify({
+      activeCompetitionId,
+      currentLifterId,
+      currentLift,
+      currentAttemptIndex,
+      attemptStatus: attempt?.status ?? null,
+      lifterName: currentLifter?.name ?? null,
+    });
+    if (snapshot === controlPlatformSnapshotRef.current) return;
+    controlPlatformSnapshotRef.current = snapshot;
+    console.log(LOG_CONTROL, "platform UI state changed", {
+      activeCompetitionId,
+      currentLifter: formatLifterRef(currentLifterId, lifters),
+      currentLift,
+      attempt: currentAttemptIndex + 1,
+      attemptStatus: attempt?.status ?? "n/a",
+      activeGroup: activeCompetitionGroupName,
+      sessionLifterCount: sessionLifters.length,
+    });
+  }, [
+    activeCompetitionId,
+    currentLifterId,
+    currentLifter,
+    currentLift,
+    currentAttemptIndex,
+    lifters,
+    activeCompetitionGroupName,
+    sessionLifters.length,
+  ]);
+
+  const controlSignalsSnapshotRef = useRef("");
+  useEffect(() => {
+    const snapshot = JSON.stringify(refereeSignals);
+    if (snapshot === controlSignalsSnapshotRef.current) return;
+    controlSignalsSnapshotRef.current = snapshot;
+    console.log(LOG_CONTROL, "referee signals in React state", {
+      left: refereeSignals[0],
+      center: refereeSignals[1],
+      right: refereeSignals[2],
+      allIn: refereeSignals.every((s) => s !== null),
+    });
+  }, [refereeSignals]);
 
   useEffect(() => {
     if (activeCompetitionGroupName) return;
