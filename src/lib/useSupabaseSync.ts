@@ -635,6 +635,24 @@ export function useSupabaseSync(
         }
         if (writes.length > 0) {
           await Promise.all(writes);
+          console.log("[Powerlifting:SessionSync]", "persistSessionSnapshot OK", {
+            competitionId: activeCompetitionId,
+            source:
+              typeof window !== "undefined" && window.location.hash.startsWith("#/display/")
+                ? "display"
+                : "control",
+            compChanged,
+            liftersChanged: changedLifters.length,
+            liftersRemoved: removedLifterIds.length,
+            currentLifterId: snapshot.currentLifterId,
+            currentLift: snapshot.currentLift,
+            currentAttemptIndex: snapshot.currentAttemptIndex,
+          });
+        } else {
+          console.log("[Powerlifting:SessionSync]", "persistSessionSnapshot no-op (already saved)", {
+            competitionId: activeCompetitionId,
+            currentLifterId: snapshot.currentLifterId,
+          });
         }
 
         if (compChanged) {
@@ -786,6 +804,14 @@ export function useSupabaseSync(
 
         const fingerprint = sessionFingerprint(session, activeCompetitionId);
         if (fingerprint === lastAppliedSessionFingerprintRef.current) {
+          console.log("[Powerlifting:SessionSync]", "session refetch skipped (fingerprint unchanged)", {
+            reason,
+            competitionId: activeCompetitionId,
+            tab:
+              typeof window !== "undefined" && window.location.hash.startsWith("#/display/")
+                ? "display"
+                : "control",
+          });
           return;
         }
 

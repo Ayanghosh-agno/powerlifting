@@ -100,8 +100,8 @@ type AppContextValue = {
     attemptIndex: number,
     weight: number | "",
   ) => { ok: boolean; message: string };
-  applyRefereeDecision: (overrideSignals?: RefSignal[]) => void;
-  resetSignals: () => void;
+  applyRefereeDecision: (overrideSignals?: RefSignal[]) => Promise<void>;
+  resetSignals: () => Promise<void>;
   connectedRefereeSlots: ConnectedRefereeSlots;
   publishRefereeSignal: (position: number, signal: RefSignal) => Promise<void>;
   trackRefereePresence: (position: number) => Promise<void>;
@@ -126,7 +126,15 @@ const COLLAR_PER_SIDE_KG = 2.5;
 const COLLAR_PAIR_KG = COLLAR_PER_SIDE_KG * 2;
 
 const LOG_CONTROL = "[Powerlifting:Control]";
+const LOG_DISPLAY = "[Powerlifting:Display]";
 const LOG_SESSION = "[Powerlifting:SessionSync]";
+
+const syncLogRole = () =>
+  typeof window !== "undefined" && window.location.hash.startsWith("#/display/")
+    ? "display"
+    : window.location.hash.includes("/referee/")
+      ? "referee"
+      : "control";
 
 function formatLifterRef(lifterId: string | null, lifters: { id: string; name: string }[]) {
   if (!lifterId) return null;
@@ -1025,6 +1033,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
   const [currentRefreeSessionId, setCurrentRefreeSessionIdState] = useState<string | null>(null);
   const stageKeyRef = useRef<string>("");
   const activeCompetitionIdRef = useRef<string | null>(null);
+  const verdictPersistInFlightRef = useRef(false);
 
   useEffect(() => {
     activeCompetitionIdRef.current = activeCompetitionId;
@@ -1075,6 +1084,22 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     const normalizedLifters = session.lifters.map((l) => normalizeLifter(l));
     const normalizedGroups = session.groups.map((g) => normalizeGroup(g));
     const competitionId = activeCompetitionIdRef.current;
+    const appliedName =
+      session.lifters.find((l) => l.id === session.currentLifterId)?.name ?? "(unknown)";
+
+    console.log(
+      isDisplayScreenRef.current ? LOG_DISPLAY : LOG_CONTROL,
+      "session applied from DB (Control/Display UI updated)",
+      {
+        role: syncLogRole(),
+        competitionId,
+        currentLifterId: session.currentLifterId,
+        currentLifterName: appliedName,
+        currentLift: session.currentLift,
+        attempt: session.currentAttemptIndex + 1,
+        lifterCount: normalizedLifters.length,
+      },
+    );
 
     setLiftersState(normalizedLifters);
     setGroupsState(normalizedGroups);
@@ -1682,9 +1707,9 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     setTimerState("IDLE", null);
   }, [setTimerState]);
 
-  const resetSignals = useCallback(() => {
+  const resetSignals = useCallback(async () => {
     setRefereeSignals([null, null, null]);
-    clearSignals();
+    await clearSignals();
   }, [clearSignals, setRefereeSignals]);
 
   const submitNextAttempt = useCallback((weight: number) => {
@@ -1748,16 +1773,63 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     return { ok: true, message: "Attempt updated." };
   }, [lifters, nextAttemptQueue, timerPhase, startNextAttemptClock, clearTimerState, setNextAttemptQueue]);
 
-  const applyRefereeDecision = useCallback((overrideSignals?: RefSignal[]) => {
+  const applyRefereeDecision = useCallback(async (overrideSignals?: RefSignal[]) => {
+    if (verdictPersistInFlightRef.current) {
+      console.warn(LOG_SESSION, "applyRefereeDecision skipped — persist already in flight", {
+        role: syncLogRole(),
+        competitionId: activeCompetitionId,
+      });
+      return;
+    }
+
+    if (!currentLifterId) {
+      console.warn(LOG_SESSION, "applyRefereeDecision skipped — no current lifter", {
+        role: syncLogRole(),
+        competitionId: activeCompetitionId,
+      });
+      return;
+    }
+
     const idx = lifters.findIndex((l) => l.id === currentLifterId);
-    if (idx < 0) return;
+    if (idx < 0) {
+      console.warn(LOG_SESSION, "applyRefereeDecision skipped — lifter not in list", {
+        role: syncLogRole(),
+        competitionId: activeCompetitionId,
+        currentLifterId,
+      });
+      return;
+    }
+
     const effectiveSignals = overrideSignals ?? refereeSignals;
     const completed = effectiveSignals.every((s) => s !== null);
-    if (!completed) return;
+    if (!completed) {
+      console.warn(LOG_SESSION, "applyRefereeDecision skipped — signals incomplete", {
+        role: syncLogRole(),
+        signals: effectiveSignals,
+      });
+      return;
+    }
 
     const noVotes = effectiveSignals.filter((s) => s === "NO").length;
     const status: AttemptStatus = noVotes >= 2 ? "NO" : "GOOD";
     const selected = lifters[idx];
+
+    console.log(
+      isDisplayScreenRef.current ? LOG_DISPLAY : LOG_CONTROL,
+      "verdict applying",
+      {
+        role: syncLogRole(),
+        competitionId: activeCompetitionId,
+        lifter: selected.name,
+        lifterId: currentLifterId,
+        lift: currentLift,
+        attempt: currentAttemptIndex + 1,
+        status,
+        signals: effectiveSignals,
+      },
+    );
+
+    verdictPersistInFlightRef.current = true;
     const attempts = [...getAttempts(selected, currentLift)];
     const currentAttempt = attempts[currentAttemptIndex] ?? { weight: "", status: "UNATTEMPTED" as AttemptStatus };
     attempts[currentAttemptIndex] = { ...currentAttempt, status };
@@ -1779,7 +1851,10 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
         : nextAttemptQueue;
 
     const orderedFlight = orderLiftersForDisplayRound(sessionLifters, currentLift, currentAttemptIndex, manualOrderByStage);
-    if (!orderedFlight.length) return;
+    if (!orderedFlight.length) {
+      verdictPersistInFlightRef.current = false;
+      return;
+    }
 
     let nextLift = currentLift;
     let nextAttemptIdx = currentAttemptIndex;
@@ -1877,46 +1952,68 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
       clearTimerState();
     }
 
-    if (isSupabaseConfigured && !supabaseSyncReadOnly) {
-      void persistSessionSnapshot({
-        lifters: updated.map((l) => normalizeLifter(l)),
-        groups,
-        currentLifterId: nextLifterId,
-        currentLift: nextLift,
-        currentAttemptIndex: nextAttemptIdx,
-        competitionStarted,
-        includeCollars,
-        timerPhase: nextTimerPhase,
-        timerEndsAt: nextTimerEndsAt,
-        competitionMode,
-        activeCompetitionGroupName,
-        nextAttemptQueue: normalizedQueue,
-        manualOrderByStage,
-      });
-    }
+    try {
+      if (isSupabaseConfigured && !supabaseSyncReadOnly) {
+        await persistSessionSnapshot({
+          lifters: updated.map((l) => normalizeLifter(l)),
+          groups,
+          currentLifterId: nextLifterId,
+          currentLift: nextLift,
+          currentAttemptIndex: nextAttemptIdx,
+          competitionStarted,
+          includeCollars,
+          timerPhase: nextTimerPhase,
+          timerEndsAt: nextTimerEndsAt,
+          competitionMode,
+          activeCompetitionGroupName,
+          nextAttemptQueue: normalizedQueue,
+          manualOrderByStage,
+        });
+        console.log(
+          isDisplayScreenRef.current ? LOG_DISPLAY : LOG_CONTROL,
+          "verdict persisted to DB — clearing referee signals",
+          {
+            role: syncLogRole(),
+            competitionId: activeCompetitionId,
+            lifter: selected.name,
+            status,
+            nextLifterId,
+            nextLift,
+            nextAttempt: nextAttemptIdx + 1,
+          },
+        );
+      }
 
-    // Same-machine display popup: one full snapshot so the screen updates without waiting on Realtime.
-    if (isSupabaseConfigured && !isDisplayScreen) {
-      broadcast({
-        lifters: updated.map((l) => normalizeLifter(l)),
-        groups,
-        currentLifterId: nextLifterId,
-        currentLift: nextLift,
-        currentAttemptIndex: nextAttemptIdx,
-        competitionStarted,
-        includeCollars,
-        timerPhase: nextTimerPhase,
-        timerEndsAt: nextTimerEndsAt,
-        competitionMode,
-        activeCompetitionGroupName,
-        nextAttemptQueue: normalizedQueue,
-        manualOrderByStage,
-      });
-    }
+      // Same-machine display popup: one full snapshot so the screen updates without waiting on Realtime.
+      if (isSupabaseConfigured && !isDisplayScreen) {
+        broadcast({
+          lifters: updated.map((l) => normalizeLifter(l)),
+          groups,
+          currentLifterId: nextLifterId,
+          currentLift: nextLift,
+          currentAttemptIndex: nextAttemptIdx,
+          competitionStarted,
+          includeCollars,
+          timerPhase: nextTimerPhase,
+          timerEndsAt: nextTimerEndsAt,
+          competitionMode,
+          activeCompetitionGroupName,
+          nextAttemptQueue: normalizedQueue,
+          manualOrderByStage,
+        });
+      }
 
-    // Reset immediately after verdict so next lifter starts with a clean signal slate.
-    // The display screen keeps its own local overlay state, so this won't interrupt animations.
-    resetSignals();
+      // Clear referee lights only after the platform snapshot is in the database.
+      await resetSignals();
+    } catch (error) {
+      console.error(LOG_SESSION, "applyRefereeDecision failed", {
+        role: syncLogRole(),
+        competitionId: activeCompetitionId,
+        error,
+      });
+    } finally {
+      verdictPersistInFlightRef.current = false;
+    }
   }, [
     lifters,
     currentLifterId,
@@ -1943,6 +2040,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     activeCompetitionGroupName,
     supabaseSyncReadOnly,
     isDisplayScreen,
+    activeCompetitionId,
   ]);
 
   useEffect(() => {
@@ -1955,7 +2053,7 @@ const AppProvider = ({ children }: { children: React.ReactNode }) => {
     stageKeyRef.current = stageKey;
     if (refereeSignals.some((signal) => signal !== null)) {
       // Defensive clear for race conditions where previous-stage signals arrive late.
-      resetSignals();
+      void resetSignals().catch((error) => console.error(LOG_SESSION, "resetSignals failed", error));
     }
   }, [currentLifterId, currentLift, currentAttemptIndex, refereeSignals, resetSignals]);
 
@@ -3129,8 +3227,12 @@ const ControlPage = () => {
               <div className="flex flex-col items-center gap-1">
                 <button
                   onClick={() => {
-                    applyRefereeDecision(["GOOD", "GOOD", "GOOD"]);
-                    setActionNotice("Good lift saved.");
+                    void applyRefereeDecision(["GOOD", "GOOD", "GOOD"])
+                      .then(() => setActionNotice("Good lift saved."))
+                      .catch((error) => {
+                        console.error(LOG_CONTROL, "Good lift persist failed", error);
+                        setActionNotice("Good lift save failed — check console.");
+                      });
                   }}
                   onMouseDown={(event) => event.preventDefault()}
                   onContextMenu={(event) => event.preventDefault()}
@@ -3146,8 +3248,12 @@ const ControlPage = () => {
               <div className="flex flex-col items-center gap-1">
                 <button
                   onClick={() => {
-                    applyRefereeDecision(["NO", "NO", "NO"]);
-                    setActionNotice("No lift saved.");
+                    void applyRefereeDecision(["NO", "NO", "NO"])
+                      .then(() => setActionNotice("No lift saved."))
+                      .catch((error) => {
+                        console.error(LOG_CONTROL, "No lift persist failed", error);
+                        setActionNotice("No lift save failed — check console.");
+                      });
                   }}
                   onMouseDown={(event) => event.preventDefault()}
                   onContextMenu={(event) => event.preventDefault()}
@@ -3196,9 +3302,10 @@ const ControlPage = () => {
           </button>
           <button
             onClick={() => {
-              resetSignals();
-              clearTimerState();
-              setActionNotice("Signals and platform timer reset.");
+              void resetSignals().then(() => {
+                clearTimerState();
+                setActionNotice("Signals and platform timer reset.");
+              });
             }}
             className="rounded border border-white/20 bg-white/10 px-4 py-2 font-serif text-4xl leading-none"
           >
@@ -5187,7 +5294,7 @@ const GroupManagementPage = () => {
 
 
 const RefereePanelTab = () => {
-  const { refereeSignals, setRefereeSignals, applyRefereeDecision, resetSignals, connectedRefereeSlots } = useAppContext();
+  const { refereeSignals, setRefereeSignals, resetSignals, connectedRefereeSlots } = useAppContext();
 
   const setSlotSignal = (slotIndex: number, signal: RefSignal) => {
     const next = [...refereeSignals];
@@ -5252,14 +5359,7 @@ const RefereePanelTab = () => {
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
-          onClick={() => applyRefereeDecision()}
-          className="rounded-xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-black hover:bg-cyan-400"
-        >
-          Apply Decision
-        </button>
-        <button
-          type="button"
-          onClick={resetSignals}
+          onClick={() => void resetSignals()}
           className="rounded-xl bg-white/10 px-4 py-2 text-sm font-semibold text-slate-100 hover:bg-white/15"
         >
           Reset Signals
@@ -5575,7 +5675,6 @@ const RefereeStationPage = () => {
     switchCompetition,
     refereeSignals,
     setRefereeSignals,
-    applyRefereeDecision,
     publishRefereeSignal,
     trackRefereePresence,
     untrackRefereePresence,
@@ -5672,13 +5771,7 @@ const RefereeStationPage = () => {
     };
   }, [activeCompetitionId, config, trackRefereePresence]);
 
-  useEffect(() => {
-    if (refereeSignals.every((signal) => signal !== null)) {
-      const timer = window.setTimeout(() => applyRefereeDecision(), 240);
-      return () => window.clearTimeout(timer);
-    }
-    return undefined;
-  }, [refereeSignals, applyRefereeDecision]);
+  // Referee phones only publish signals to Supabase. Verdict + DB persist run on the display screen.
 
   if (isLoading) {
     return <InvalidSessionError error="Validating session..." isLoading={true} />;
@@ -6838,7 +6931,15 @@ const DisplayFullPage = () => {
 
     const timer = window.setTimeout(() => {
       displayVerdictFingerprintRef.current = fingerprint;
-      applyRefereeDecision();
+      console.log(LOG_DISPLAY, "3/3 signals — applying official verdict", {
+        currentLifterId,
+        currentLift,
+        attempt: currentAttemptIndex + 1,
+        signals: refereeSignals,
+      });
+      void applyRefereeDecision().catch((error) =>
+        console.error(LOG_DISPLAY, "verdict apply failed", error),
+      );
     }, 240);
 
     return () => window.clearTimeout(timer);
@@ -6991,7 +7092,7 @@ const DisplayFullPage = () => {
 
         // applyRefereeDecision already clears signals when Supabase is on; keep for offline display.
         if (!isSupabaseConfigured) {
-          resetSignals();
+          void resetSignals();
         }
         setIsFinalVerdictAnimating(false);
       };
